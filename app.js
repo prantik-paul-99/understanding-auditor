@@ -25,7 +25,6 @@ const App = (() => {
 
   // ── Init ───────────────────────────────────────────────────────────────────
   function init() {
-    // Animate stage 0 in on load
     requestAnimationFrame(() => {
       const s = document.getElementById("stage-0");
       if (s) {
@@ -33,40 +32,6 @@ const App = (() => {
         setTimeout(() => s.classList.add("visible"), 30);
       }
     });
-  }
-
-  // ── API Key ────────────────────────────────────────────────────────────────
-  function requireApiKey(callback) {
-    const key = sessionStorage.getItem("ua_api_key");
-    if (key) { callback(); return; }
-    document.getElementById("apiModal").classList.add("open");
-    window._pendingCallback = callback;
-  }
-
-  function saveApiKey() {
-    const val = document.getElementById("apiKeyInput").value.trim();
-    if (!val.startsWith("sk-ant-")) {
-      shakeInput("apiKeyInput");
-      showModalError("That doesn't look like a valid Anthropic key. It should start with sk-ant-");
-      return;
-    }
-    sessionStorage.setItem("ua_api_key", val);
-    document.getElementById("apiModal").classList.remove("open");
-    if (window._pendingCallback) {
-      window._pendingCallback();
-      window._pendingCallback = null;
-    }
-  }
-
-  function showModalError(msg) {
-    let el = document.getElementById("modalError");
-    if (!el) {
-      el = document.createElement("p");
-      el.id = "modalError";
-      el.style.cssText = "color:#ff6b6b;font-size:0.8rem;margin-top:0.5rem;font-family:var(--font-mono)";
-      document.querySelector(".modal").appendChild(el);
-    }
-    el.textContent = msg;
   }
 
   // ── Stage Navigation ───────────────────────────────────────────────────────
@@ -144,22 +109,20 @@ const App = (() => {
     }
     state.priorKnowledge = prior;
 
-    requireApiKey(() => {
-      goToStage(3);
+    goToStage(3);
 
-      AI.analyzeGaps({
-        concept:        state.concept,
-        background:     state.background,
-        goal:           state.goal,
-        priorKnowledge: state.priorKnowledge
-      })
-      .then(html => {
-        state.gapAnalysis = html;
-        showAIResult("gapLoading", "gapContent", html);
-        document.getElementById("gapBtns").style.display = "flex";
-      })
-      .catch(err => handleError(err, "gapLoading"));
-    });
+    AI.analyzeGaps({
+      concept:        state.concept,
+      background:     state.background,
+      goal:           state.goal,
+      priorKnowledge: state.priorKnowledge
+    })
+    .then(html => {
+      state.gapAnalysis = html;
+      showAIResult("gapLoading", "gapContent", html);
+      document.getElementById("gapBtns").style.display = "flex";
+    })
+    .catch(err => handleError(err, "gapLoading"));
   }
 
   // ── Stage 3 → 4: Explain ──────────────────────────────────────────────────
@@ -236,18 +199,16 @@ const App = (() => {
     state.stressAnswers = answers;
     goToStage(6);
 
-    // Show stress result card, hide final teach input until result loads
-    const resultCard  = document.getElementById("stressResultCard");
-    const teachGroup  = document.getElementById("finalTeachGroup");
-    const teachBtns   = document.getElementById("finalTeachBtns");
-    const scoreWrap   = document.getElementById("scoreResultWrap");
+    const resultCard = document.getElementById("stressResultCard");
+    const teachGroup = document.getElementById("finalTeachGroup");
+    const teachBtns  = document.getElementById("finalTeachBtns");
+    const scoreWrap  = document.getElementById("scoreResultWrap");
 
-    resultCard.style.display  = "block";
-    teachGroup.style.display  = "none";
-    teachBtns.style.display   = "none";
-    scoreWrap.style.display   = "none";
+    resultCard.style.display = "block";
+    teachGroup.style.display = "none";
+    teachBtns.style.display  = "none";
+    scoreWrap.style.display  = "none";
 
-    // Insert a loading indicator inside the result card
     resultCard.innerHTML = `
       <div class="ai-loading">
         <div class="loading-dots"><span></span><span></span><span></span></div>
@@ -263,8 +224,6 @@ const App = (() => {
     .then(html => {
       state.stressResult = html;
       resultCard.innerHTML = `<div class="ai-content">${html}</div>`;
-
-      // Now reveal the final teach-back section
       teachGroup.style.display = "block";
       teachBtns.style.display  = "flex";
       teachGroup.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -288,32 +247,30 @@ const App = (() => {
     }
     state.finalTeachBack = final;
 
-    const scoreWrap  = document.getElementById("scoreResultWrap");
-    const scoreLoad  = document.getElementById("scoreLoading");
-    const scoreResult= document.getElementById("scoreResult");
+    const scoreWrap   = document.getElementById("scoreResultWrap");
+    const scoreLoad   = document.getElementById("scoreLoading");
+    const scoreResult = document.getElementById("scoreResult");
 
-    scoreWrap.style.display  = "block";
-    scoreLoad.style.display  = "flex";
-    scoreResult.style.display= "none";
+    scoreWrap.style.display   = "block";
+    scoreLoad.style.display   = "flex";
+    scoreResult.style.display = "none";
     scoreWrap.scrollIntoView({ behavior: "smooth", block: "start" });
 
     AI.scoreFinalTeachBack({
-      concept:       state.concept,
-      background:    state.background,
-      finalTeachBack:state.finalTeachBack,
-      gapAnalysis:   state.gapAnalysis
+      concept:        state.concept,
+      background:     state.background,
+      finalTeachBack: state.finalTeachBack,
+      gapAnalysis:    state.gapAnalysis
     })
     .then(result => {
       state.score = result.score;
       scoreLoad.style.display   = "none";
       scoreResult.style.display = "block";
 
-      // Animate score number
       animateScore(result.score);
-      document.getElementById("scoreLabel").textContent = result.label;
-      document.getElementById("scoreFeedback").innerHTML = AI.renderText(result.feedback);
+      document.getElementById("scoreLabel").textContent    = result.label;
+      document.getElementById("scoreFeedback").innerHTML   = AI.renderText(result.feedback);
 
-      // Color score by level
       const numEl = document.getElementById("scoreNumber");
       if      (result.score >= 90) numEl.style.color = "#00d4c8";
       else if (result.score >= 75) numEl.style.color = "#e8b84b";
@@ -346,7 +303,6 @@ const App = (() => {
   }
 
   function selectArtifact(type) {
-    // Highlight selected card
     document.querySelectorAll(".artifact-card").forEach(c => c.classList.remove("selected"));
     document.querySelector(`[data-artifact="${type}"]`).classList.add("selected");
 
@@ -372,12 +328,12 @@ const App = (() => {
 
     AI.generateArtifact({
       type,
-      concept:       state.concept,
-      background:    state.background,
-      explanation:   state.explanation,
-      gapAnalysis:   state.gapAnalysis,
-      finalTeachBack:state.finalTeachBack,
-      score:         state.score
+      concept:        state.concept,
+      background:     state.background,
+      explanation:    state.explanation,
+      gapAnalysis:    state.gapAnalysis,
+      finalTeachBack: state.finalTeachBack,
+      score:          state.score
     })
     .then(html => {
       loading.style.display = "none";
@@ -387,31 +343,28 @@ const App = (() => {
     .catch(err => {
       loading.style.display = "none";
       output.style.display  = "block";
-      output.innerHTML      = `<p style="color:#ff6b6b">Error generating artifact: ${err.message}</p>`;
+      output.innerHTML = `<p style="color:#ff6b6b">Error generating artifact: ${err.message}</p>`;
     });
   }
 
   // ── Restart ───────────────────────────────────────────────────────────────
   function restart() {
-    // Reset state
     Object.assign(state, {
       concept:"", background:"", goal:"", priorKnowledge:"",
       gapAnalysis:"", explanation:"", stressQuestions:[],
       stressAnswers:[], stressResult:"", finalTeachBack:"", score:0, currentStage:0
     });
 
-    // Clear inputs
     ["conceptInput","backgroundInput","goalInput","priorKnowledgeInput","finalTeachInput"]
       .forEach(id => { const el = document.getElementById(id); if(el) el.value = ""; });
 
-    // Reset AI cards
-    resetAICard("gapLoading",          "gapContent");
-    resetAICard("explanationLoading",  "explanationContent");
-    resetAICard("stressLoading",       "stressQuestions");
+    resetAICard("gapLoading",         "gapContent");
+    resetAICard("explanationLoading", "explanationContent");
+    resetAICard("stressLoading",      "stressQuestions");
 
-    document.getElementById("gapBtns").style.display         = "none";
-    document.getElementById("explanationBtns").style.display = "none";
-    document.getElementById("stressBtns").style.display      = "none";
+    document.getElementById("gapBtns").style.display          = "none";
+    document.getElementById("explanationBtns").style.display  = "none";
+    document.getElementById("stressBtns").style.display       = "none";
     document.getElementById("stressResultCard").style.display = "none";
     document.getElementById("scoreResultWrap").style.display  = "none";
     document.getElementById("artifactOutputWrap").style.display = "none";
@@ -440,14 +393,14 @@ const App = (() => {
     const el = document.getElementById(id);
     if (!el) return;
     el.style.animation = "none";
-    el.offsetHeight; // reflow
+    el.offsetHeight;
     el.style.animation = "shake 0.4s ease";
     el.focus();
     setTimeout(() => el.style.animation = "", 400);
   }
 
   function showInputHint(id, msg) {
-    const el  = document.getElementById(id);
+    const el = document.getElementById(id);
     if (!el) return;
     let hint = el.nextElementSibling;
     if (!hint || !hint.classList.contains("input-error")) {
@@ -474,8 +427,8 @@ const App = (() => {
       `;
       document.body.appendChild(toast);
     }
-    toast.textContent = msg;
-    toast.style.opacity = "1";
+    toast.textContent    = msg;
+    toast.style.opacity  = "1";
     setTimeout(() => { toast.style.opacity = "0"; }, 2500);
   }
 
@@ -484,19 +437,11 @@ const App = (() => {
     if (loading) {
       loading.innerHTML = `
         <p style="color:#ff6b6b;font-family:var(--font-mono);font-size:0.85rem;text-align:center">
-          ${err.message === "NO_KEY" ? "No API key found. Please refresh and add your key." : `Error: ${err.message}`}
+          Error: ${err.message}
         </p>
       `;
     }
   }
-
-  // ── Keyboard shortcuts ─────────────────────────────────────────────────────
-  document.addEventListener("keydown", e => {
-    // Enter to confirm API key
-    if (e.key === "Enter" && document.getElementById("apiModal").classList.contains("open")) {
-      saveApiKey();
-    }
-  });
 
   // ── Inject shake animation ─────────────────────────────────────────────────
   const shakeStyle = document.createElement("style");
@@ -519,8 +464,7 @@ const App = (() => {
     start, goToStage, goToStage2,
     analyzeGaps, explainConcept, stressTest,
     evaluateStressTest, scoreFinalTeachBack,
-    goToArtifacts, selectArtifact,
-    saveApiKey, restart
+    goToArtifacts, selectArtifact, restart
   };
 
 })();
