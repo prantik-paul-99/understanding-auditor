@@ -311,9 +311,13 @@ const App = (() => {
           output.innerHTML = result.data + `<div class="download-bar"><button class="btn-download" onclick="App.downloadArtifact()">${dlLabel}</button></div>`;
         }
       })
+      // .catch(err => {
+      //   loading.style.display = "none"; output.style.display = "block";
+      //   output.innerHTML = `<p style="color:#ff6b6b">Error generating artifact: ${err.message}</p>`;
+      // });
       .catch(err => {
         loading.style.display = "none"; output.style.display = "block";
-        output.innerHTML = `<p style="color:#ff6b6b">Error generating artifact: ${err.message}</p>`;
+        handleError(err, "artifactOutput");
       });
   }
 
