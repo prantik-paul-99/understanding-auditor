@@ -1,28 +1,42 @@
 /* ─────────────────────────────────────────
-   UNDERSTANDING AUDITOR — ai.js
-   Calls /api/chat (Vercel serverless → Gemini)
+   UNDERSTANDING AUDITOR — ai.js v3
+   Changes: prior quiz, JSON artifacts, fence stripping
 ───────────────────────────────────────── */
 
 const AI = (() => {
 
-  // ── Core call ──────────────────────────────────────────────────────────────
   async function call(systemPrompt, userMessage, maxTokens = 1000) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ systemPrompt, userMessage, maxTokens })
     });
-
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err?.error || `Server error ${res.status}`);
     }
-
     const data = await res.json();
     return (data.text || "").trim();
   }
 
-  // ── Render markdown-ish text to HTML ──────────────────────────────────────
+  function stripFences(raw) {
+    return raw
+      .replace(/^```[\w]*\s*\n?/gm, '')
+      .replace(/\n?```\s*$/gm, '')
+      .trim();
+  }
+
+  function parseJSON(raw) {
+    const clean = stripFences(raw);
+    try { return JSON.parse(clean); } catch {
+      const arr = clean.match(/\[[\s\S]*\]/);
+      const obj = clean.match(/\{[\s\S]*\}/);
+      if (arr) return JSON.parse(arr[0]);
+      if (obj) return JSON.parse(obj[0]);
+      throw new Error("Could not parse AI response as JSON");
+    }
+  }
+
   function renderText(raw) {
     return raw
       .replace(/^### (.+)$/gm, '<h3>$1</h3>')
@@ -33,99 +47,115 @@ const AI = (() => {
       .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
       .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
       .split(/\n{2,}/)
-      .map(p => p.trim())
-      .filter(Boolean)
+      .map(p => p.trim()).filter(Boolean)
       .map(p => p.startsWith('<') ? p : `<p>${p.replace(/\n/g, ' ')}</p>`)
       .join('\n');
   }
 
-  // ── 1. Gap Analysis ────────────────────────────────────────────────────────
-  async function analyzeGaps({ concept, background, goal, priorKnowledge }) {
-    const system = `You are an expert learning analyst and educator. Your job is to identify exactly where someone's understanding of a concept breaks down — not to lecture, but to diagnose. Be honest but kind. Use structured output.`;
-
+  // ── 0. Prior Knowledge Quiz ───────────────────────────────────────────────
+  async function generatePriorQuiz({ concept, background }) {
+    const system = `You are a diagnostic quiz generator. Return ONLY valid JSON — no markdown, no backticks, no extra text whatsoever.`;
     const user = `
-Concept the user wants to learn: "${concept}"
-Their background: "${background}"
-Their goal: "${goal}"
+Generate exactly 5 diagnostic MCQ questions about "${concept}" for someone with background: "${background}".
+Test different aspects at varied difficulty. All 4 options should be plausible (not obviously wrong).
+Return ONLY this JSON array with no other text before or after:
+[
+  {
+    "id": 1,
+    "question": "...",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correct": 0
+  }
+]
+"correct" is the 0-based index of the correct option.
+    `.trim();
+    const raw = await call(system, user, 900);
+    return parseJSON(raw);
+  }
 
-Here is what they wrote when asked to explain the concept:
+  // ── 1. Gap Analysis (from quiz answers) ──────────────────────────────────
+  async function analyzeGaps({ concept, background, goal, priorQuiz, priorAnswers }) {
+    const score = priorAnswers.filter((a, i) => a === priorQuiz[i].correct).length;
+    const summary = priorQuiz.map((q, i) => {
+      const ans = priorAnswers[i];
+      const answered = ans !== null && ans !== undefined;
+      const selected = answered ? q.options[ans] : "(not answered)";
+      const correct  = q.options[q.correct];
+      const isCorrect = ans === q.correct;
+      return `Q: ${q.question}\nSelected: "${selected}" — ${isCorrect ? '✓ CORRECT' : '✗ WRONG'}\nCorrect: "${correct}"`;
+    }).join('\n\n');
+
+    const system = `You are an expert learning analyst. Diagnose understanding from quiz performance. Be specific, honest, constructive. Use markdown headers.`;
+    const user = `
+Concept: "${concept}" | Background: "${background}" | Goal: "${goal}"
+Diagnostic score: ${score}/5
+
+Quiz results:
 ---
-${priorKnowledge}
+${summary}
 ---
 
-Analyze their understanding. Your response must include:
+Include these sections:
 
 ## What you got right
-List 2-3 things they understood correctly (even partially). Be specific and genuine — don't invent praise.
+Specific things demonstrated from correct answers. Genuine — no invented praise.
 
 ## The gaps
-List 3-5 specific gaps or misconceptions in their understanding. For each gap, briefly say why it matters. Be precise — name the actual missing piece.
+3-5 knowledge gaps from wrong answers. For each: what the correct understanding is and why it matters.
 
-## The one biggest misunderstanding
-If there's a core misconception anchoring the other gaps, call it out clearly.
+## The core misconception
+If one central misunderstanding drove multiple wrong answers, name it clearly.
 
-## What to focus on
-2-3 sentences on which gaps to prioritize given their background and goal.
+## Learning priorities
+2-3 sentences on what to focus on given background and goal.
 
-Keep it tight. No filler. Speak directly to them as "you".
+Direct. No filler. Speak as "you".
     `.trim();
-
     const raw = await call(system, user, 900);
     return renderText(raw);
   }
 
-  // ── 2. Personalized Explanation ───────────────────────────────────────────
-  async function explainConcept({ concept, background, goal, gapAnalysis, priorKnowledge }) {
-    const system = `You are a world-class teacher who specializes in making complex ideas click for specific people. You never give generic explanations. You always connect new knowledge to what the learner already knows and cares about. You are precise, vivid, and never condescending.`;
-
+  // ── 2. Personalized Explanation ──────────────────────────────────────────
+  async function explainConcept({ concept, background, goal, gapAnalysis, priorQuiz, priorAnswers }) {
+    const score = priorAnswers.filter((a, i) => a === priorQuiz[i].correct).length;
+    const system = `You are a world-class teacher. Give personalized explanations. Connect to what the learner already knows. Precise, vivid, never condescending.`;
     const user = `
-Concept: "${concept}"
-Learner's background: "${background}"
-Their goal: "${goal}"
+Concept: "${concept}" | Background: "${background}" | Goal: "${goal}" | Quiz score: ${score}/5
 
-Here is what they already knew (their brain dump):
----
-${priorKnowledge}
----
-
-Here is the gap analysis of their understanding:
+Gap analysis:
 ---
 ${gapAnalysis}
 ---
 
-Now write a personalized explanation that:
-1. Starts with a hook — a vivid analogy or real-world example that connects to their specific background
-2. Addresses each gap identified above, in order of importance
-3. Builds from what they already got right — don't re-explain things they know
+Write a personalized explanation that:
+1. Opens with a hook/analogy relevant to their specific background
+2. Addresses each identified gap in order of importance
+3. Builds from what they got right — don't re-explain known things
 4. Uses concrete examples, not abstract definitions
-5. Ends with a "mental model" — one memorable sentence that captures the whole concept
+5. Ends with one memorable "mental model" sentence
 
-Format with clear sections. Keep it under 500 words. Make every sentence earn its place.
+Clear sections. Under 500 words. Every sentence earns its place.
     `.trim();
-
     const raw = await call(system, user, 1100);
     return renderText(raw);
   }
 
-  // ── 3. Stress Test Questions ───────────────────────────────────────────────
+  // ── 3. Stress Test ────────────────────────────────────────────────────────
   async function generateStressTest({ concept, background, gapAnalysis }) {
-    const system = `You are a rigorous examiner who designs stress tests to distinguish surface-level knowledge from deep understanding. Your questions target the specific weak points of this specific learner. You always return valid JSON and nothing else — no markdown, no backticks, no preamble.`;
-
+    const system = `You generate stress-test questions targeting a learner's gaps. Return ONLY valid JSON — no markdown, no backticks.`;
     const user = `
-Concept: "${concept}"
-Learner background: "${background}"
-Their identified gaps:
+Concept: "${concept}" | Background: "${background}"
+Gaps:
 ---
 ${gapAnalysis}
 ---
-
-Generate exactly 4 stress-test questions that target their specific gaps. These should NOT be simple recall questions — they should require genuine understanding to answer well. Include:
-- 1 edge case question ("What happens when...")
+Generate exactly 4 stress-test questions targeting their specific gaps. Require genuine understanding, not recall.
+- 1 edge case ("What happens when...")
 - 1 "explain the difference" question
 - 1 "why does this matter" question
-- 1 "spot the flaw" or misconception-busting question
+- 1 "spot the flaw" question
 
-Return ONLY a JSON array, no markdown, no backticks, no preamble:
+Return ONLY this JSON array:
 [
   { "id": 1, "type": "Edge case", "question": "..." },
   { "id": 2, "type": "Explain the difference", "question": "..." },
@@ -133,137 +163,103 @@ Return ONLY a JSON array, no markdown, no backticks, no preamble:
   { "id": 4, "type": "Spot the flaw", "question": "..." }
 ]
     `.trim();
-
     const raw = await call(system, user, 700);
-    const clean = raw.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
+    return parseJSON(raw);
   }
 
-  // ── 4. Evaluate Stress Test ────────────────────────────────────────────────
+  // ── 4. Evaluate Stress Test ──────────────────────────────────────────────
   async function evaluateStressTest({ concept, questions, answers }) {
-    const system = `You are a fair, sharp examiner. You evaluate how well someone answered stress-test questions and give concise, specific feedback. You point out what was good, what was missing, and what the correct insight is.`;
-
+    const system = `You evaluate stress-test answers honestly and concisely.`;
     const qa = questions.map((q, i) =>
       `Q${i+1} [${q.type}]: ${q.question}\nAnswer: ${answers[i] || "(no answer)"}`
-    ).join("\n\n");
-
+    ).join('\n\n');
     const user = `
 Concept: "${concept}"
-
-Here are the questions and the learner's answers:
+Q&A:
 ---
 ${qa}
 ---
-
-For each question, give:
-- A one-line verdict (Strong / Partial / Missed)
-- 1-2 sentences on what was right or wrong
-- The key insight they may have missed (if any)
-
-Then a 2-sentence summary of their overall performance on the stress test.
-
-Be honest. Don't pad with encouragement.
+For each question:
+- Verdict (Strong / Partial / Missed)
+- 1-2 sentences on what was right/wrong
+- Key insight missed (if any)
+Then 2-sentence overall summary. Be honest.
     `.trim();
-
     const raw = await call(system, user, 800);
     return renderText(raw);
   }
 
-  // ── 5. Score Final Teach-Back ─────────────────────────────────────────────
+  // ── 5. Score Final Teach-Back ────────────────────────────────────────────
   async function scoreFinalTeachBack({ concept, background, finalTeachBack, gapAnalysis }) {
-    const system = `You are a rigorous understanding evaluator. You score how well someone has internalized a concept based on their final explanation. You are calibrated, not generous. A 90+ means they genuinely understand it. Return valid JSON only — no markdown, no backticks, no preamble.`;
-
+    const system = `You score a learner's final explanation rigorously. Return ONLY valid JSON — no markdown, no backticks.`;
     const user = `
-Concept: "${concept}"
-Learner background: "${background}"
+Concept: "${concept}" | Background: "${background}"
+Original gaps: ${gapAnalysis}
+Final explanation: ${finalTeachBack}
 
-Original gaps identified:
----
-${gapAnalysis}
----
-
-Their final teach-back explanation:
----
-${finalTeachBack}
----
-
-Evaluate their final explanation and return ONLY this JSON:
+Return ONLY:
 {
-  "score": <integer 0-100>,
-  "label": <one of: "Novice", "Developing", "Solid", "Strong", "Mastery">,
-  "feedback": "<3-5 sentences of specific feedback — what improved, what gaps remain, one thing to do next>"
+  "score": <0-100>,
+  "label": <"Novice"|"Developing"|"Solid"|"Strong"|"Mastery">,
+  "feedback": "<3-5 sentences: what improved, remaining gaps, one next step>"
 }
-
-Scoring guide:
-0-39: Novice (major gaps remain)
-40-59: Developing (partial understanding)
-60-74: Solid (good grasp, some gaps)
-75-89: Strong (clear understanding, minor gaps)
-90-100: Mastery (could teach it confidently)
+0-39=Novice, 40-59=Developing, 60-74=Solid, 75-89=Strong, 90-100=Mastery
     `.trim();
-
     const raw = await call(system, user, 400);
-    const clean = raw.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
+    return parseJSON(raw);
   }
 
-  // ── 6. Generate Artifact ──────────────────────────────────────────────────
+  // ── 6. Generate Artifact ─────────────────────────────────────────────────
   async function generateArtifact({ type, concept, background, explanation, gapAnalysis, finalTeachBack, score }) {
+    const ctx = `Concept: "${concept}" | Background: "${background}" | Score: ${score}/100\nExplanation: ${explanation}\nGaps: ${gapAnalysis}\nTeach-back: ${finalTeachBack}`;
 
-    const context = `
-Concept: "${concept}"
-Learner background: "${background}"
-Their final understanding score: ${score}/100
+    // FLASHCARDS → JSON
+    if (type === 'flashcards') {
+      const system = `You generate flashcard data as JSON. Return ONLY valid JSON, no markdown, no backticks, no extra text.`;
+      const user = `${ctx}\n\nGenerate 8 flashcards for "${concept}" targeting the learner's specific gaps.\nMix types: definition, application, compare/contrast, edge case.\n\nReturn ONLY this JSON array:\n[\n  { "front": "Question or term", "back": "Answer or explanation" }\n]`;
+      const raw = await call(system, user, 1000);
+      return { type: 'json', subtype: 'flashcards', data: parseJSON(raw) };
+    }
 
-Key explanation (personalized):
-${explanation}
+    // QUIZ → JSON
+    if (type === 'quiz') {
+      const system = `You generate quiz data as JSON. Return ONLY valid JSON, no markdown, no backticks, no extra text.`;
+      const user = `${ctx}\n\nGenerate a 6-question MCQ quiz on "${concept}" targeting this learner's gaps.\nEach question needs 4 plausible options, correct index (0-based), and a brief explanation.\n\nReturn ONLY this JSON:\n{\n  "title": "Quiz: ${concept}",\n  "questions": [\n    {\n      "question": "...",\n      "options": ["A","B","C","D"],\n      "correct": 0,\n      "explanation": "..."\n    }\n  ]\n}`;
+      const raw = await call(system, user, 1200);
+      return { type: 'json', subtype: 'quiz', data: parseJSON(raw) };
+    }
 
-Identified gaps:
-${gapAnalysis}
-
-Their final teach-back:
-${finalTeachBack}
-    `.trim();
-
+    // HTML ARTIFACTS — NO FENCES
     const prompts = {
       mindmap: {
-        system: `You create clear, well-structured concept maps in HTML. Use divs and CSS to visually represent a concept and its connected ideas. Make it visually appealing using a dark theme with gold and teal accents. Return only the HTML/CSS snippet — no full page, just the content div and a <style> block.`,
-        user: `${context}\n\nCreate a visual concept map for "${concept}" based on the learner's journey. Show the main concept in the center, branch out to 4-6 key sub-concepts, and note the learner's specific gaps in red. Use a dark background (#0d1220), gold (#e8b84b) for the center node, teal (#00d4c8) for sub-concepts, and #ff6b6b for gap nodes. Make it visually structured with connecting lines using CSS borders. Label everything clearly.`,
-        tokens: 1400
+        system: `You create concept maps as self-contained HTML+CSS. Return ONLY raw HTML with an embedded <style> tag. Absolutely no markdown fences, no backticks, no preamble text of any kind.`,
+        user: `${ctx}\n\nCreate a scrollable visual concept map for "${concept}".\nStyle: center node gold (#e8b84b), sub-concept nodes teal (#00d4c8), gap nodes coral (#ff6b6b), dark bg (#0d1220).\nUse CSS flexbox/grid layout. Min-height 550px. All text readable. Connecting lines via CSS borders.\nReturn ONLY raw HTML — no fences, no backticks, no preamble.`,
+        tokens: 1500
       },
       infographic: {
-        system: `You create informative, visually structured infographics as HTML+CSS. Use a clean layout with sections, icons (use Unicode/emoji), bold numbers, and clear hierarchy. Dark theme with gold and teal. Return only the content HTML and a <style> block — no full page wrapper.`,
-        user: `${context}\n\nCreate an infographic about "${concept}" tailored to this learner. Include: a headline definition, 3-4 key facts or stats, the learner's top 2 gaps as "watch out" callouts, and a "bottom line" summary. Make it visually rich — use colored sections, emoji icons, and typographic hierarchy.`,
-        tokens: 1400
-      },
-      flashcards: {
-        system: `You create flashcard sets in clean HTML. Each card has a front (question/term) and back (answer/explanation). Target the learner's specific gaps. Return only the HTML content and a <style> block.`,
-        user: `${context}\n\nCreate 8 flashcards for "${concept}" targeting this learner's specific gaps. Mix question types: definition, application, "what's the difference between X and Y", and "what happens when...". Style them with dark backgrounds, gold card fronts, teal card backs. Show both sides stacked for each card.`,
-        tokens: 1200
+        system: `You create infographics as self-contained HTML+CSS. Return ONLY raw HTML with an embedded <style> tag. No markdown fences, no backticks, no preamble.`,
+        user: `${ctx}\n\nCreate a visual infographic for "${concept}":\n- Large headline definition\n- 3-4 key facts with emoji icons in colored boxes\n- Learner's top 2 gaps as "⚠️ Watch out" callouts\n- "Bottom line" summary box\n- Dark theme (#0d1220), gold and teal accents, readable fonts\nReturn ONLY raw HTML — no fences, no backticks.`,
+        tokens: 1500
       },
       slides: {
-        system: `You create mini slide decks as HTML. Each slide is a styled div. Use a clean presentation layout with dark backgrounds, large text, and bullet points. Return only the slides HTML and a <style> block.`,
-        user: `${context}\n\nCreate a 6-slide mini-lecture on "${concept}" for someone with this background. Slides: 1) Hook/why it matters, 2) Core definition, 3) How it works, 4) Common misconceptions (from the gaps), 5) Real-world example, 6) Key takeaway. Style each slide with a dark background, numbered, with large headings and concise bullets.`,
-        tokens: 1400
+        system: `You create slide decks as self-contained HTML+CSS. Return ONLY raw HTML with an embedded <style> tag. No markdown fences, no backticks, no preamble.`,
+        user: `${ctx}\n\nCreate 6 presentation slides for "${concept}":\n1. Hook/Why it matters  2. Core definition  3. How it works  4. Misconceptions from gaps  5. Real-world example  6. Key takeaway\nEach slide: numbered div, large heading, 3-4 bullets. Dark theme, large readable text. Each slide min-height 300px with clear separation. Include @media print CSS.\nReturn ONLY raw HTML — no fences, no backticks.`,
+        tokens: 1500
       },
       explainer: {
-        system: `You write polished, well-structured written explainers. Clear prose, good examples, no jargon without explanation. Return only the article content HTML and a <style> block.`,
-        user: `${context}\n\nWrite a 400-500 word explainer article on "${concept}" at the level appropriate for this learner's background. Structure: engaging intro, core explanation (addressing their gaps), one concrete example, and a memorable closing line. Use headers. Write like a smart friend who actually knows the subject.`,
-        tokens: 1200
-      },
-      quiz: {
-        system: `You create interactive quizzes in HTML+JS. Multiple choice questions with instant feedback on click. Dark themed. Return only the quiz HTML, CSS, and JS — no full page wrapper.`,
-        user: `${context}\n\nCreate a 5-question multiple choice quiz testing understanding of "${concept}". Target the learner's identified gaps. Each question should have 4 options with one correct answer. Add click-to-reveal correct answer with a brief explanation. Style with dark backgrounds, gold for correct answers, red for wrong. Make it interactive.`,
-        tokens: 1400
+        system: `You write explainer articles as self-contained HTML+CSS. Return ONLY raw HTML with an embedded <style> tag. No markdown fences, no backticks, no preamble.`,
+        user: `${ctx}\n\nWrite a 400-500 word explainer on "${concept}" for this learner.\nSections: hook intro, core explanation addressing their gaps, concrete example, memorable closing.\nReadable serif typography, dark theme, generous spacing.\nReturn ONLY raw HTML — no fences, no backticks.`,
+        tokens: 1300
       }
     };
 
     const p = prompts[type];
-    return await call(p.system, p.user, p.tokens);
+    const raw = await call(p.system, p.user, p.tokens);
+    return { type: 'html', data: stripFences(raw) };
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
   return {
+    generatePriorQuiz,
     analyzeGaps,
     explainConcept,
     generateStressTest,

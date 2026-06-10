@@ -766,3 +766,271 @@ body {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0; }
 }
+
+/* ─────────────────────────────────────────
+   v3 ADDITIONS
+───────────────────────────────────────── */
+
+/* ── Prior Knowledge Quiz ── */
+.pq-question {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.6rem;
+  margin-bottom: 1.2rem;
+}
+.pq-q-num {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.15em;
+  color: var(--teal);
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.pq-q-text {
+  font-size: 1rem;
+  color: var(--text);
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+.pq-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pq-option {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  color: var(--text-dim);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition), color var(--transition), background var(--transition);
+}
+.pq-option:hover {
+  border-color: var(--gold-dim);
+  color: var(--text);
+  background: var(--bg-2);
+}
+.pq-option.selected {
+  border-color: var(--gold);
+  color: var(--text);
+  background: rgba(232,184,75,0.08);
+}
+.pq-opt-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.pq-option.selected .pq-opt-letter {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #080a10;
+}
+
+/* ── Artifact Quiz ── */
+.quiz-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.quiz-progress {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--teal);
+  letter-spacing: 0.05em;
+}
+.quiz-question {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.4rem 1.6rem;
+  margin-bottom: 1.2rem;
+}
+.quiz-q-num {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--teal);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.quiz-q-text {
+  font-size: 1rem;
+  color: var(--text);
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+.quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.quiz-option {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.7rem 1rem;
+  color: var(--text-dim);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.quiz-option:not(:disabled):hover {
+  border-color: var(--gold-dim);
+  color: var(--text);
+}
+.quiz-option.correct {
+  border-color: var(--teal);
+  background: rgba(0,212,200,0.1);
+  color: var(--teal);
+}
+.quiz-option.wrong {
+  border-color: #ff6b6b;
+  background: rgba(255,107,107,0.08);
+  color: #ff6b6b;
+}
+.quiz-option:disabled { cursor: default; }
+.quiz-opt-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+.quiz-explanation {
+  margin-top: 0.9rem;
+  padding: 0.7rem 1rem;
+  background: rgba(0,212,200,0.06);
+  border-left: 3px solid var(--teal);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  line-height: 1.6;
+}
+.quiz-final {
+  text-align: center;
+  padding: 2rem;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-top: 1.5rem;
+}
+
+/* ── Flip Flashcards ── */
+.flashcard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.2rem;
+  margin-bottom: 1.5rem;
+}
+.flip-card {
+  height: 180px;
+  perspective: 1000px;
+  cursor: pointer;
+}
+.flip-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.55s cubic-bezier(0.4,0,0.2,1);
+  transform-style: preserve-3d;
+}
+.flip-card.flipped .flip-card-inner {
+  transform: rotateY(180deg);
+}
+.flip-card-front, .flip-card-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border-radius: var(--radius);
+  padding: 1.2rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+.flip-card-front {
+  background: linear-gradient(135deg, rgba(232,184,75,0.12), rgba(232,184,75,0.04));
+  border: 1px solid rgba(232,184,75,0.3);
+}
+.flip-card-back {
+  background: linear-gradient(135deg, rgba(0,212,200,0.1), rgba(0,212,200,0.03));
+  border: 1px solid rgba(0,212,200,0.3);
+  transform: rotateY(180deg);
+}
+.flip-card-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 0.6rem;
+}
+.flip-card-front .flip-card-label { color: var(--gold-dim); }
+.flip-card-back  .flip-card-label { color: var(--teal-dim); }
+.flip-card-front p { color: var(--text); font-size: 0.95rem; line-height: 1.5; }
+.flip-card-back  p { color: var(--text-dim); font-size: 0.88rem; line-height: 1.55; }
+
+/* ── Download Bar ── */
+.download-bar {
+  margin-top: 1.5rem;
+  padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+.btn-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--bg-3);
+  color: var(--teal);
+  border: 1px solid var(--border-teal);
+  border-radius: var(--radius);
+  padding: 0.7rem 1.4rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.btn-download:hover {
+  background: rgba(0,212,200,0.08);
+  border-color: var(--teal);
+  color: #fff;
+}
+
+/* ── Artifact output scrollable ── */
+#artifactOutput {
+  max-height: 75vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}

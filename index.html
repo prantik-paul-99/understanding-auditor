@@ -7,15 +7,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Fira+Code:wght@300;400;500&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,300&display=swap" rel="stylesheet" />
+  <!-- PDF & Image export libs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-  <!-- Background grid decoration -->
   <div class="bg-grid"></div>
   <div class="bg-glow"></div>
 
-  <!-- Header -->
   <header class="site-header">
     <div class="logo">
       <span class="logo-icon">⬡</span>
@@ -27,7 +28,6 @@
     </div>
   </header>
 
-  <!-- Main App Container -->
   <main class="app-container">
 
     <!-- ── STAGE 0: Landing ── -->
@@ -35,23 +35,20 @@
       <div class="stage-inner hero">
         <p class="eyebrow">cognitive learning tool</p>
         <h1 class="hero-title">You don't understand it<br/><em>until you can teach it.</em></h1>
-        <p class="hero-sub">
-          This isn't a lecture. It's a mirror.<br/>
-          Tell us what you want to learn — we'll find the gaps, fill them your way, and make sure they stick.
-        </p>
+        <p class="hero-sub">This isn't a lecture. It's a mirror.<br/>Tell us what you want to learn — we'll find the gaps, fill them your way, and make sure they stick.</p>
         <button class="btn-primary" onclick="App.start()">Begin the Audit →</button>
         <div class="hero-steps">
-          <div class="step-pill">01 You explain it first</div>
+          <div class="step-pill">01 Diagnostic quiz</div>
           <div class="step-pill">02 AI finds the gaps</div>
           <div class="step-pill">03 Personalized fill</div>
           <div class="step-pill">04 Stress test</div>
-          <div class="step-pill">05 You teach it back</div>
+          <div class="step-pill">05 Teach it back</div>
           <div class="step-pill">06 Export your artifact</div>
         </div>
       </div>
     </section>
 
-    <!-- ── STAGE 1: Concept + Background ── -->
+    <!-- ── STAGE 1: Setup ── -->
     <section class="stage" id="stage-1">
       <div class="stage-inner">
         <p class="eyebrow">Stage 1 of 6 — Setup</p>
@@ -60,60 +57,38 @@
 
         <div class="input-group">
           <label class="input-label">The concept</label>
-          <input
-            type="text"
-            id="conceptInput"
-            class="text-input"
-            placeholder="e.g. Transformer architecture, Keynesian economics, CRISPR..."
-          />
+          <input type="text" id="conceptInput" class="text-input" placeholder="e.g. Transformer architecture, Keynesian economics, CRISPR..." />
         </div>
-
         <div class="input-group">
           <label class="input-label">Your background <span class="label-hint">(so we speak your language)</span></label>
-          <input
-            type="text"
-            id="backgroundInput"
-            class="text-input"
-            placeholder="e.g. CS grad student, high school teacher, curious accountant..."
-          />
+          <input type="text" id="backgroundInput" class="text-input" placeholder="e.g. CS grad student, high school teacher, curious accountant..." />
         </div>
-
         <div class="input-group">
           <label class="input-label">Your goal <span class="label-hint">(why do you want to understand this?)</span></label>
-          <input
-            type="text"
-            id="goalInput"
-            class="text-input"
-            placeholder="e.g. interview prep, writing an article, genuine curiosity..."
-          />
+          <input type="text" id="goalInput" class="text-input" placeholder="e.g. interview prep, writing an article, genuine curiosity..." />
         </div>
 
-        <button class="btn-primary" onclick="App.goToStage2()">Next →</button>
+        <button class="btn-primary" onclick="App.goToStage2()">Next — take the diagnostic quiz →</button>
       </div>
     </section>
 
-    <!-- ── STAGE 2: Initial Teach-Back ── -->
+    <!-- ── STAGE 2: Prior Knowledge Quiz ── -->
     <section class="stage" id="stage-2">
       <div class="stage-inner">
-        <p class="eyebrow">Stage 2 of 6 — Your Current Map</p>
-        <h2 class="stage-title">Explain it to us.</h2>
-        <p class="stage-sub" id="stage2Sub">Before we teach you anything — tell us what you already know about <strong id="conceptDisplay"></strong>. Don't Google it. Brain-dump. Wrong answers are fine.</p>
+        <p class="eyebrow">Stage 2 of 6 — Diagnostic Quiz</p>
+        <h2 class="stage-title">Let's see what you already know.</h2>
+        <p class="stage-sub">No pressure — wrong answers are useful data. Don't Google. Just go with your gut.</p>
 
-        <div class="input-group">
-          <label class="input-label">Your explanation</label>
-          <textarea
-            id="priorKnowledgeInput"
-            class="text-input textarea"
-            rows="7"
-            placeholder="Write as much or as little as you know. Stream of consciousness is perfect..."
-          ></textarea>
+        <div class="ai-loading" id="priorQuizLoading">
+          <div class="loading-dots"><span></span><span></span><span></span></div>
+          <p>Generating your diagnostic quiz...</p>
         </div>
 
-        <div class="textarea-hint">Aim for at least 3–4 sentences. The more you write, the better we can map your gaps.</div>
+        <div id="priorQuizWrap" style="display:none"></div>
 
-        <div class="btn-row">
+        <div class="btn-row" id="priorQuizBtns" style="display:none">
           <button class="btn-ghost" onclick="App.goToStage(1)">← Back</button>
-          <button class="btn-primary" onclick="App.analyzeGaps()">Analyze my understanding →</button>
+          <button class="btn-primary" onclick="App.submitPriorQuiz()">Submit quiz →</button>
         </div>
       </div>
     </section>
@@ -183,33 +158,25 @@
       </div>
     </section>
 
-    <!-- ── STAGE 6: Final Teach-Back + Score ── -->
+    <!-- ── STAGE 6: Final Teach-Back ── -->
     <section class="stage" id="stage-6">
       <div class="stage-inner">
         <p class="eyebrow">Stage 6 of 6 — Final Teach-Back</p>
         <h2 class="stage-title">Now teach it back.</h2>
-        <p class="stage-sub">Explain <strong id="conceptDisplay2"></strong> as if teaching someone with no background in it. Use your own words.</p>
+        <p class="stage-sub">Explain <strong id="conceptDisplay"></strong> as if teaching someone with no background in it. Use your own words.</p>
 
-        <div class="ai-response-card" id="stressResultCard" style="display:none">
-          <div class="ai-content" id="stressResultContent"></div>
-        </div>
+        <div class="ai-response-card" id="stressResultCard" style="display:none"></div>
 
-        <div class="input-group" id="finalTeachGroup">
+        <div class="input-group" id="finalTeachGroup" style="display:none">
           <label class="input-label">Your final explanation</label>
-          <textarea
-            id="finalTeachInput"
-            class="text-input textarea"
-            rows="8"
-            placeholder="Go for it. Explain it like you own it now..."
-          ></textarea>
+          <textarea id="finalTeachInput" class="text-input textarea" rows="8" placeholder="Go for it. Explain it like you own it now..."></textarea>
         </div>
 
-        <div class="btn-row" id="finalTeachBtns">
+        <div class="btn-row" id="finalTeachBtns" style="display:none">
           <button class="btn-ghost" onclick="App.goToStage(5)">← Back</button>
           <button class="btn-primary" onclick="App.scoreFinalTeachBack()">Score my understanding →</button>
         </div>
 
-        <!-- Score result -->
         <div id="scoreResultWrap" style="display:none">
           <div class="ai-loading" id="scoreLoading">
             <div class="loading-dots"><span></span><span></span><span></span></div>
@@ -226,15 +193,13 @@
             <div class="ai-response-card">
               <div class="ai-content" id="scoreFeedback"></div>
             </div>
-            <button class="btn-primary" onclick="App.goToArtifacts()" style="margin-top:2rem">
-              Generate my artifact →
-            </button>
+            <button class="btn-primary" onclick="App.goToArtifacts()" style="margin-top:2rem">Generate my artifact →</button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ── STAGE 7: Artifact Generator ── -->
+    <!-- ── STAGE 7: Artifacts ── -->
     <section class="stage" id="stage-7">
       <div class="stage-inner">
         <p class="eyebrow">Bonus Stage — Artifact Generator</p>
@@ -245,32 +210,32 @@
           <div class="artifact-card" onclick="App.selectArtifact('mindmap')" data-artifact="mindmap">
             <div class="artifact-icon">🗺️</div>
             <div class="artifact-name">Concept Map</div>
-            <div class="artifact-desc">Visual web of the concept, its parts, and how they connect</div>
+            <div class="artifact-desc">Visual web of the concept and how its parts connect. Downloads as PNG.</div>
           </div>
           <div class="artifact-card" onclick="App.selectArtifact('infographic')" data-artifact="infographic">
             <div class="artifact-icon">📊</div>
             <div class="artifact-name">Infographic</div>
-            <div class="artifact-desc">Key ideas, stats, and visuals in a shareable graphic</div>
+            <div class="artifact-desc">Key ideas and visuals in a shareable graphic. Downloads as PNG.</div>
           </div>
           <div class="artifact-card" onclick="App.selectArtifact('flashcards')" data-artifact="flashcards">
             <div class="artifact-icon">🃏</div>
-            <div class="artifact-name">Flashcard Set</div>
-            <div class="artifact-desc">Spaced-repetition cards targeting your specific gaps</div>
+            <div class="artifact-name">Flashcards</div>
+            <div class="artifact-desc">Click to flip. Targets your specific gaps. Downloads as PDF.</div>
           </div>
           <div class="artifact-card" onclick="App.selectArtifact('slides')" data-artifact="slides">
             <div class="artifact-icon">📑</div>
             <div class="artifact-name">Mini-Lecture Slides</div>
-            <div class="artifact-desc">A tight slide deck you could actually present</div>
+            <div class="artifact-desc">A tight slide deck you could actually present. Downloads as HTML.</div>
           </div>
           <div class="artifact-card" onclick="App.selectArtifact('explainer')" data-artifact="explainer">
             <div class="artifact-icon">📝</div>
             <div class="artifact-name">Written Explainer</div>
-            <div class="artifact-desc">A polished article-style breakdown at your chosen level</div>
+            <div class="artifact-desc">Polished article-style breakdown. Downloads as HTML.</div>
           </div>
           <div class="artifact-card" onclick="App.selectArtifact('quiz')" data-artifact="quiz">
             <div class="artifact-icon">🎯</div>
             <div class="artifact-name">Quiz</div>
-            <div class="artifact-desc">A custom quiz to test others on what you just learned</div>
+            <div class="artifact-desc">Interactive MCQ — click options, get instant feedback. Downloads as PDF.</div>
           </div>
         </div>
 
