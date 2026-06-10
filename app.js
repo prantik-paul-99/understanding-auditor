@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────
    UNDERSTANDING AUDITOR — app.js v4
-   Changes: Error intercepts, Image crop fix, PDF fixes, Restored shake animation
+   Changes: ONLY Bug Fixes (Error intercepts, Image crop fix, PDF fixes)
 ───────────────────────────────────────── */
 
 const App = (() => {
@@ -35,7 +35,7 @@ const App = (() => {
     });
   }
 
-  // ── Navigation ─────────────────────────────────────────────────────────────
+  // ── Stage Navigation ───────────────────────────────────────────────────────
   function goToStage(n) {
     const current = document.querySelector(".stage.active");
     if (current) {
@@ -50,555 +50,634 @@ const App = (() => {
 
   function showStage(n) {
     const next = document.getElementById(`stage-${n}`);
-    if (next) {
-      next.classList.add("active");
-      setTimeout(() => {
-        next.classList.add("visible");
-        next.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 30);
-    }
+    if (!next) return;
+    next.classList.add("active");
+    next.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => next.classList.add("visible"), 30);
   }
 
-  function updateProgress(n) {
-    const p = Math.round((n / TOTAL_STAGES) * 100);
-    document.documentElement.style.setProperty('--progress', `${p}%`);
-    const lbl = document.getElementById("progressLabel");
-    if (lbl) {
-      lbl.textContent = n === 0 ? "Setup" : `Stage ${n} of 6`;
-    }
+  function updateProgress(stage) {
+    const wrap  = document.getElementById("progressWrap");
+    const bar   = document.getElementById("progressBar");
+    const label = document.getElementById("progressLabel");
+    if (stage === 0) { wrap.style.display = "none"; return; }
+    wrap.style.display = "flex";
+    bar.style.setProperty("--progress", `${Math.round((stage / TOTAL_STAGES) * 100)}%`);
+    label.textContent = `Stage ${stage} of ${TOTAL_STAGES}`;
   }
 
-  // ── Utils & Errors ─────────────────────────────────────────────────────────
-  function showToast(msg) {
-    let t = document.getElementById("ua-toast");
-    if (!t) {
-      t = document.createElement("div"); t.id = "ua-toast";
-      t.style.cssText = "position:fixed;bottom:2rem;left:50%;transform:translateX(-50%);background:#1a2030;border:1px solid var(--border);border-radius:8px;padding:0.75rem 1.4rem;font-family:var(--font-mono);font-size:0.82rem;color:var(--text);z-index:300;box-shadow:0 8px 30px rgba(0,0,0,0.5);transition:opacity 0.3s ease;opacity:0;pointer-events:none";
-      document.body.appendChild(t);
-    }
-    t.textContent = msg; t.style.opacity = "1";
-    clearTimeout(t._timer);
-    t._timer = setTimeout(() => { t.style.opacity = "0"; }, 2800);
-  }
+  // ── Stage 0 → 1 ───────────────────────────────────────────────────────────
+  function start() { goToStage(1); }
 
-  function handleError(err, loadingId) {
-    const el = document.getElementById(loadingId);
-    if (!el) return;
-    
-    let msg = err.message || "Unknown error";
-    
-    // Intercept massive text wall quota limits
-    if (msg.includes("Quota exceeded") || msg.includes("limit: 0")) {
-      msg = "API Quota Exceeded. Verify your model is set to a free-tier limit.";
-    } else if (msg.length > 150) {
-      msg = msg.substring(0, 150) + "..."; 
-    }
-    
-    el.innerHTML = `<p style="color:#ff6b6b;font-family:var(--font-mono);font-size:0.85rem;text-align:center;margin:1rem 0;">Error: ${msg}</p>`;
-  }
+  // ── Stage 1 → 2: Validate + Generate Prior Quiz ───────────────────────────
+  function goToStage2() {
+    const concept    = document.getElementById("conceptInput").value.trim();
+    const background = document.getElementById("backgroundInput").value.trim();
+    const goal       = document.getElementById("goalInput").value.trim();
 
-  // ── PDF & Image Download Logic ─────────────────────────────────────────────
-  
-  // Renders the download button safely outside the screenshot zone
-  function renderDownloadBar(type, htmlContainer) {
-    // Remove existing bar if any
-    const existing = document.getElementById("dynamic-download-bar");
-    if (existing) existing.remove();
+    if (!concept)    { shakeInput("conceptInput");    return; }
+    if (!background) { shakeInput("backgroundInput"); return; }
+    if (!goal)       { shakeInput("goalInput");       return; }
 
-    const wrap = document.getElementById("artifactOutputWrap");
-    const bar = document.createElement("div");
-    bar.id = "dynamic-download-bar";
-    bar.className = "download-bar";
+    state.concept    = concept;
+    state.background = background;
+    state.goal       = goal;
 
-    const btn = document.createElement("button");
-    btn.className = "btn-download";
+    const cd = document.getElementById("conceptDisplay");
+    const cd2 = document.getElementById("conceptDisplay2");
+    if (cd)  cd.textContent  = concept;
+    if (cd2) cd2.textContent = concept;
 
-    if (['mindmap', 'infographic'].includes(type)) {
-      btn.innerHTML = `<span>↓</span> Download as PNG`;
-      btn.onclick = () => downloadAsImage(type);
-    } else {
-      btn.innerHTML = `<span>↓</span> Download as PDF`;
-      btn.onclick = () => downloadAsPDF(type);
-    }
+    // Reset prior quiz UI
+    const pql = document.getElementById("priorQuizLoading");
+    const pqw = document.getElementById("priorQuizWrap");
+    const pqb = document.getElementById("priorQuizBtns");
+    if (pql) { pql.style.display = "flex"; pql.innerHTML = `<div class="loading-dots"><span></span><span></span><span></span></div><p>Generating your diagnostic quiz...</p>`; }
+    if (pqw) { pqw.style.display = "none"; pqw.innerHTML = ""; }
+    if (pqb)   pqb.style.display = "none";
 
-    bar.appendChild(btn);
-    wrap.appendChild(bar); // Append OUTSIDE artifactOutput
-  }
+    goToStage(2);
 
-  async function downloadAsImage(type) {
-    const target = document.getElementById("artifactOutput");
-    if (!target) return;
-
-    const originalMaxHeight = target.style.maxHeight;
-    const originalOverflow = target.style.overflow;
-
-    // Expand container fully to prevent html2canvas cropping
-    target.style.maxHeight = "none";
-    target.style.overflow = "visible";
-
-    try {
-      const canvas = await window.html2canvas(target, { 
-        scale: 2, 
-        backgroundColor: "#0d1220",
-        useCORS: true 
+    AI.generatePriorQuiz({ concept, background })
+      .then(questions => {
+        state.priorQuiz    = questions;
+        state.priorAnswers = new Array(questions.length).fill(null);
+        renderPriorQuiz(questions);
+      })
+      .catch(err => {
+        if (pql) pql.innerHTML = `<p style="color:#ff6b6b;font-family:var(--font-mono);font-size:0.85rem;text-align:center">Error generating quiz: ${err.message}</p>`;
       });
-      const link = document.createElement("a");
-      link.download = `${state.concept.replace(/\s+/g, '_')}_${type}.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    } catch (e) {
-      showToast("Failed to generate image.");
-      console.error(e);
-    } finally {
-      // Restore container constraints
-      target.style.maxHeight = originalMaxHeight;
-      target.style.overflow = originalOverflow;
-    }
   }
 
-  async function downloadAsPDF(type) {
-    if (!window.jspdf) {
-      showToast("PDF library loading, try again in a moment.");
+  function renderPriorQuiz(questions) {
+    const pql = document.getElementById("priorQuizLoading");
+    const pqw = document.getElementById("priorQuizWrap");
+    const pqb = document.getElementById("priorQuizBtns");
+    if (pql) pql.style.display = "none";
+    if (pqw) { pqw.style.display = "block"; pqw.innerHTML = questions.map((q, i) => `
+      <div class="pq-question" id="pq-${i}">
+        <div class="pq-q-num">Question ${i+1} of ${questions.length}</div>
+        <div class="pq-q-text">${q.question}</div>
+        <div class="pq-options">
+          ${q.options.map((opt, oi) => `
+            <button class="pq-option" id="pqo-${i}-${oi}" onclick="App.selectPriorOption(${i}, ${oi})">
+              <span class="pq-opt-letter">${String.fromCharCode(65+oi)}</span>${opt}
+            </button>
+          `).join('')}
+        </div>
+      </div>`).join('');
+    }
+    if (pqb) pqb.style.display = "flex";
+  }
+
+  function selectPriorOption(qi, oi) {
+    for (let i = 0; i < (state.priorQuiz[qi]?.options?.length || 4); i++) {
+      document.getElementById(`pqo-${qi}-${i}`)?.classList.remove('selected');
+    }
+    document.getElementById(`pqo-${qi}-${oi}`)?.classList.add('selected');
+    state.priorAnswers[qi] = oi;
+  }
+
+  // ── Stage 2 → 3: Submit + Analyze Gaps ────────────────────────────────────
+  function submitPriorQuiz() {
+    if (state.priorAnswers.filter(a => a !== null).length === 0) {
+      showToast("Answer at least one question to continue.");
       return;
     }
-    const { jsPDF } = window.jspdf;
+    goToStage(3);
+    AI.analyzeGaps({
+      concept:      state.concept,
+      background:   state.background,
+      goal:         state.goal,
+      priorQuiz:    state.priorQuiz,
+      priorAnswers: state.priorAnswers
+    })
+    .then(html => {
+      state.gapAnalysis = html;
+      showAIResult("gapLoading", "gapContent", html);
+      document.getElementById("gapBtns").style.display = "flex";
+    })
+    .catch(err => handleError(err, "gapLoading"));
+  }
+
+  // ── Stage 3 → 4: Explain ──────────────────────────────────────────────────
+  function explainConcept() {
+    goToStage(4);
+    AI.explainConcept({
+      concept:      state.concept,
+      background:   state.background,
+      goal:         state.goal,
+      gapAnalysis:  state.gapAnalysis,
+      priorQuiz:    state.priorQuiz,
+      priorAnswers: state.priorAnswers
+    })
+    .then(html => {
+      state.explanation = html;
+      showAIResult("explanationLoading", "explanationContent", html);
+      document.getElementById("explanationBtns").style.display = "flex";
+    })
+    .catch(err => handleError(err, "explanationLoading"));
+  }
+
+  // ── Stage 4 → 5: Stress Test ──────────────────────────────────────────────
+  function stressTest() {
+    goToStage(5);
+    AI.generateStressTest({
+      concept:     state.concept,
+      background:  state.background,
+      gapAnalysis: state.gapAnalysis
+    })
+    .then(questions => {
+      state.stressQuestions = questions;
+      renderStressQuestions(questions);
+    })
+    .catch(err => handleError(err, "stressLoading"));
+  }
+
+  function renderStressQuestions(questions) {
+    document.getElementById("stressLoading").style.display = "none";
+    const wrap = document.getElementById("stressQuestions");
+    wrap.style.display = "block";
+    wrap.innerHTML = questions.map((q, i) => `
+      <div class="stress-question">
+        <div class="stress-q-number">Question ${q.id} — ${q.type}</div>
+        <div class="stress-q-text">${q.question}</div>
+        <textarea class="stress-q-input" id="stress-answer-${i}" placeholder="Your answer..." rows="3"></textarea>
+      </div>`).join('');
+    document.getElementById("stressBtns").style.display = "flex";
+  }
+
+  // ── Stage 5 → 6: Evaluate ─────────────────────────────────────────────────
+  function evaluateStressTest() {
+    const answers = state.stressQuestions.map((_, i) => {
+      const el = document.getElementById(`stress-answer-${i}`);
+      return el ? el.value.trim() : "";
+    });
+    if (answers.every(a => a === "")) { showToast("Answer at least one question before submitting."); return; }
+    state.stressAnswers = answers;
+
+    goToStage(6);
+
+    const resultCard = document.getElementById("stressResultCard");
+    resultCard.style.display = "block";
+    document.getElementById("finalTeachGroup").style.display = "none";
+    document.getElementById("finalTeachBtns").style.display  = "none";
+    document.getElementById("scoreResultWrap").style.display  = "none";
+    resultCard.innerHTML = `<div class="ai-loading"><div class="loading-dots"><span></span><span></span><span></span></div><p>Evaluating your stress test answers...</p></div>`;
+
+    AI.evaluateStressTest({ concept: state.concept, questions: state.stressQuestions, answers: state.stressAnswers })
+      .then(html => {
+        state.stressResult = html;
+        resultCard.innerHTML = `<div class="ai-content">${html}</div>`;
+        document.getElementById("finalTeachGroup").style.display = "block";
+        document.getElementById("finalTeachBtns").style.display  = "flex";
+        document.getElementById("finalTeachGroup").scrollIntoView({ behavior: "smooth", block: "start" });
+      })
+      .catch(err => {
+        resultCard.innerHTML = `<div class="ai-content" style="color:#ff6b6b">Error: ${err.message}</div>`;
+        document.getElementById("finalTeachGroup").style.display = "block";
+        document.getElementById("finalTeachBtns").style.display  = "flex";
+      });
+  }
+
+  // ── Score Final Teach-Back ─────────────────────────────────────────────────
+  function scoreFinalTeachBack() {
+    const final = document.getElementById("finalTeachInput").value.trim();
+    if (final.length < 40) { shakeInput("finalTeachInput"); showInputHint("finalTeachInput", "Write more — explain it as if teaching someone."); return; }
+    state.finalTeachBack = final;
+
+    const scoreWrap   = document.getElementById("scoreResultWrap");
+    const scoreLoad   = document.getElementById("scoreLoading");
+    const scoreResult = document.getElementById("scoreResult");
+    scoreWrap.style.display = "block"; scoreLoad.style.display = "flex"; scoreResult.style.display = "none";
+    scoreWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    AI.scoreFinalTeachBack({ concept: state.concept, background: state.background, finalTeachBack: state.finalTeachBack, gapAnalysis: state.gapAnalysis })
+      .then(result => {
+        state.score = result.score;
+        scoreLoad.style.display = "none"; scoreResult.style.display = "block";
+        animateScore(result.score);
+        document.getElementById("scoreLabel").textContent  = result.label;
+        document.getElementById("scoreFeedback").innerHTML = AI.renderText(result.feedback);
+        const numEl = document.getElementById("scoreNumber");
+        if      (result.score >= 90) numEl.style.color = "#00d4c8";
+        else if (result.score >= 75) numEl.style.color = "#e8b84b";
+        else if (result.score >= 60) numEl.style.color = "#a0c878";
+        else if (result.score >= 40) numEl.style.color = "#f0a050";
+        else                          numEl.style.color = "#ff6b6b";
+      })
+      .catch(err => {
+        scoreLoad.style.display = "none";
+        scoreWrap.innerHTML = `<p style="color:#ff6b6b;font-family:var(--font-mono);font-size:0.85rem">Error: ${err.message}</p>`;
+      });
+  }
+
+  function animateScore(target) {
+    const el = document.getElementById("scoreNumber");
+    let current = 0;
+    const step = Math.ceil(target / 40);
+    const timer = setInterval(() => { current = Math.min(current + step, target); el.textContent = current; if (current >= target) clearInterval(timer); }, 30);
+  }
+
+  // ── Stage 7: Artifacts ────────────────────────────────────────────────────
+  function goToArtifacts() { goToStage(7); }
+
+  function selectArtifact(type) {
+    state.currentArtifactType = type;
+    document.querySelectorAll(".artifact-card").forEach(c => c.classList.remove("selected"));
+    document.querySelector(`[data-artifact="${type}"]`)?.classList.add("selected");
+
+    const outputWrap  = document.getElementById("artifactOutputWrap");
+    const loading     = document.getElementById("artifactLoading");
+    const output      = document.getElementById("artifactOutput");
+    const loadingText = document.getElementById("artifactLoadingText");
+
+    const labels = { mindmap:"Building your concept map...", infographic:"Designing your infographic...", flashcards:"Generating your flashcard set...", slides:"Creating your slide deck...", explainer:"Writing your explainer article...", quiz:"Building your quiz..." };
+
+    outputWrap.style.display = "block"; loading.style.display = "flex";
+    output.style.display = "none"; output.innerHTML = "";
+    loadingText.textContent = labels[type] || "Generating...";
+    outputWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    AI.generateArtifact({ type, concept: state.concept, background: state.background, explanation: state.explanation, gapAnalysis: state.gapAnalysis, finalTeachBack: state.finalTeachBack, score: state.score })
+      .then(result => {
+        loading.style.display = "none";
+        if (result.type === 'json') {
+          if (result.subtype === 'flashcards') renderFlashcards(result.data);
+          else if (result.subtype === 'quiz')  renderArtifactQuiz(result.data);
+        } else {
+          output.style.display = "block";
+          const dlLabel = (type === 'slides' || type === 'explainer') ? '⬇ Download PDF' : '⬇ Download as Image (PNG)';
+          output.innerHTML = result.data + `<div class="download-bar"><button class="btn-download" onclick="App.downloadArtifact()">${dlLabel}</button></div>`;
+        }
+      })
+      .catch(err => {
+        loading.style.display = "none"; output.style.display = "block";
+        output.innerHTML = `<p style="color:#ff6b6b">Error generating artifact: ${err.message}</p>`;
+      });
+  }
+
+  // ── Flashcard Renderer ─────────────────────────────────────────────────────
+  function renderFlashcards(data) {
+    state.flashcardData = data;
+    const output = document.getElementById("artifactOutput");
+    output.style.display = "block";
+    output.innerHTML = `
+      <div style="margin-bottom:1.2rem">
+        <h2 style="font-family:var(--font-display);color:var(--gold);font-size:1.5rem;margin-bottom:0.3rem">Flashcards: ${state.concept}</h2>
+        <p style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">Click any card to flip it and reveal the answer</p>
+      </div>
+      <div class="flashcard-grid">
+        ${data.map((card, i) => `
+          <div class="flip-card" onclick="this.classList.toggle('flipped')">
+            <div class="flip-card-inner">
+              <div class="flip-card-front">
+                <div class="flip-card-label">Card ${i+1}</div>
+                <p>${card.front}</p>
+              </div>
+              <div class="flip-card-back">
+                <div class="flip-card-label">Answer</div>
+                <p>${card.back}</p>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="download-bar">
+        <button class="btn-download" onclick="App.downloadArtifact()">⬇ Download Flashcards (PDF)</button>
+      </div>`;
+  }
+
+  // ── Quiz Renderer ──────────────────────────────────────────────────────────
+  function renderArtifactQuiz(data) {
+    state.quizData    = data;
+    state.quizAnswered = new Array(data.questions.length).fill(null);
+    state.quizCorrect  = 0;
+    const output = document.getElementById("artifactOutput");
+    output.style.display = "block";
+    output.innerHTML = `
+      <div class="quiz-header">
+        <h2 style="font-family:var(--font-display);color:var(--gold);font-size:1.4rem">${data.title}</h2>
+        <div class="quiz-progress" id="quizProgress">0/${data.questions.length} answered</div>
+      </div>
+      ${data.questions.map((q, qi) => `
+        <div class="quiz-question" id="qq-${qi}">
+          <div class="quiz-q-num">Question ${qi+1} of ${data.questions.length}</div>
+          <div class="quiz-q-text">${q.question}</div>
+          <div class="quiz-options" id="qopts-${qi}">
+            ${q.options.map((opt, oi) => `
+              <button class="quiz-option" id="qo-${qi}-${oi}" onclick="App.answerQuizOption(${qi},${oi},${q.correct})">
+                <span class="quiz-opt-letter">${String.fromCharCode(65+oi)}</span>${opt}
+              </button>`).join('')}
+          </div>
+          <div class="quiz-explanation" id="qe-${qi}" style="display:none">💡 ${q.explanation}</div>
+        </div>`).join('')}
+      <div class="quiz-final" id="quizFinal" style="display:none">
+        <div id="quizFinalScore"></div>
+        <button class="btn-download" onclick="App.downloadArtifact()" style="margin-top:1.2rem">⬇ Download Quiz + Answers (PDF)</button>
+      </div>`;
+  }
+
+  function answerQuizOption(qi, oi, correct) {
+    if (state.quizAnswered[qi] !== null) return;
+    state.quizAnswered[qi] = oi; // Storing the index so PDF knows what was picked
+    if (oi === correct) state.quizCorrect++;
+
+    document.querySelectorAll(`#qopts-${qi} .quiz-option`).forEach((btn, i) => {
+      btn.disabled = true;
+      if (i === correct) btn.classList.add('correct');
+      if (i === oi && oi !== correct) {
+        btn.classList.add('wrong');
+        btn.classList.add('shake'); // Shake class added here
+      }
+    });
+    document.getElementById(`qe-${qi}`).style.display = "block";
+
+    const answeredCount = state.quizAnswered.filter(a => a !== null).length;
+    const total = state.quizData.questions.length;
+    document.getElementById("quizProgress").textContent = `${answeredCount}/${total} answered — ${state.quizCorrect} correct`;
+
+    if (answeredCount === total) {
+      const final = document.getElementById("quizFinal");
+      final.style.display = "block";
+      const pct = state.quizCorrect / total;
+      const label = pct >= 0.9 ? '🏆 Mastery' : pct >= 0.7 ? '⭐ Strong' : pct >= 0.5 ? '📈 Getting there' : '📚 Keep studying';
+      document.getElementById("quizFinalScore").innerHTML = `
+        <span style="font-size:3rem;font-family:var(--font-display);color:var(--gold);font-weight:900">${state.quizCorrect}</span>
+        <span style="font-size:1.5rem;color:var(--text-dim)">/${total}</span>
+        <span style="font-family:var(--font-mono);color:var(--teal);font-size:1rem;margin-left:1rem">${label}</span>`;
+      final.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  // ── Downloads (UPDATED FOR FIXES) ─────────────────────────────────────────
+  function downloadArtifact() {
+    const type = state.currentArtifactType;
     
-    // For HTML-based artifacts (Slides & Explainer), snapshot the UI directly to PDF
-    if (type === 'slides' || type === 'explainer') {
-      const target = document.getElementById("artifactOutput");
-      const originalMaxHeight = target.style.maxHeight;
-      const originalOverflow = target.style.overflow;
-      
-      target.style.maxHeight = "none";
-      target.style.overflow = "visible";
-      
-      try {
-        const canvas = await window.html2canvas(target, { scale: 2, backgroundColor: "#0d1220" });
-        const imgData = canvas.toDataURL("image/jpeg", 1.0);
-        
+    // 1. Hide the download bar so it doesn't get captured
+    const downloadBar = document.querySelector('.download-bar');
+    if (downloadBar) downloadBar.style.display = 'none';
+
+    // 2. Temporarily remove max-height so image captures full scroll height
+    const out = document.getElementById("artifactOutput");
+    const oldMaxHeight = out.style.maxHeight;
+    const oldOverflow = out.style.overflow;
+    out.style.maxHeight = 'none';
+    out.style.overflow = 'visible';
+
+    // Helper to restore UI after generation
+    const restoreUI = () => {
+      if (downloadBar) downloadBar.style.display = 'flex';
+      out.style.maxHeight = oldMaxHeight;
+      out.style.overflow = oldOverflow;
+    };
+
+    if (type === 'mindmap' || type === 'infographic') {
+      if (!window.html2canvas) { showToast("Image library not loaded. Please refresh."); restoreUI(); return; }
+      showToast("Capturing image...");
+      html2canvas(out, { backgroundColor: '#0d1220', scale: 2, useCORS: true })
+        .then(canvas => {
+          const a = document.createElement('a');
+          a.download = `${state.concept.replace(/\s+/g,'-')}-${type}.png`;
+          a.href = canvas.toDataURL('image/png');
+          a.click();
+          showToast("Image saved!");
+          restoreUI();
+        })
+        .catch(() => {
+          showToast("Couldn't capture — try right-click > Save.");
+          restoreUI();
+        });
+
+    } else if (type === 'flashcards' && state.flashcardData) {
+      downloadFlashcardsPDF();
+      restoreUI();
+    } else if (type === 'quiz' && state.quizData) {
+      downloadQuizPDF();
+      restoreUI();
+    } else if (type === 'slides' || type === 'explainer') {
+      // 3. Slides and Explainer now export cleanly to PDF using html2canvas + jsPDF
+      if (!window.jspdf?.jsPDF || !window.html2canvas) { 
+         showToast("PDF libraries not loaded. Please refresh."); 
+         restoreUI(); 
+         return; 
+      }
+      showToast(`Generating ${type} PDF...`);
+      html2canvas(out, { backgroundColor: '#0d1220', scale: 2, useCORS: true }).then(canvas => {
+        const imgData = canvas.toDataURL('image/jpeg', 1.0);
+        const { jsPDF } = window.jspdf;
         const orientation = type === 'slides' ? 'landscape' : 'portrait';
-        const doc = new jsPDF({ orientation });
+        const doc = new jsPDF({ orientation, unit: 'mm' });
         
-        const imgProps = doc.getImageProperties(imgData);
         const pdfWidth = doc.internal.pageSize.getWidth();
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
         
         doc.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-        doc.save(`${state.concept.replace(/\s+/g, '_')}_${type}.pdf`);
-      } finally {
-        target.style.maxHeight = originalMaxHeight;
-        target.style.overflow = originalOverflow;
-      }
-      return;
+        doc.save(`${state.concept.replace(/\s+/g,'-')}-${type}.pdf`);
+        showToast("PDF saved!");
+        restoreUI();
+      }).catch(() => {
+         showToast("Failed to generate PDF.");
+         restoreUI();
+      });
     }
+  }
 
-    // For JSON-based artifacts (Flashcards & Quizzes), draw them programmatically
-    const doc = new jsPDF();
+  function downloadFlashcardsPDF() {
+    if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded. Please refresh."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const cards = state.flashcardData;
     const margin = 15;
     let y = 20;
 
-    if (type === 'flashcards' && state.flashcardData) {
-      doc.setFontSize(16);
-      doc.text(`Flashcards: ${state.concept}`, margin, y);
-      y += 15;
+    doc.setFontSize(16);
+    doc.text(`Flashcards: ${state.concept}`, margin, y);
+    y += 15;
 
+    cards.forEach((card, i) => {
       doc.setFontSize(11);
-      state.flashcardData.forEach((card, i) => {
-        const qLines = doc.splitTextToSize(`Q: ${card.front}`, 180);
-        const aLines = doc.splitTextToSize(`A: ${card.back}`, 180);
-        const blockHeight = (qLines.length + aLines.length) * 6 + 10;
+      const qLines = doc.splitTextToSize(`Q: ${card.front}`, 180);
+      const aLines = doc.splitTextToSize(`A: ${card.back}`, 180);
+      const blockHeight = (qLines.length + aLines.length) * 6 + 10;
 
-        if (y + blockHeight > 280) {
-          doc.addPage();
-          y = 20;
-        }
-
-        doc.setFont("helvetica", "bold");
-        doc.text(qLines, margin, y);
-        y += qLines.length * 6;
-
-        doc.setFont("helvetica", "normal");
-        doc.text(aLines, margin, y);
-        y += aLines.length * 6 + 8;
-      });
-      doc.save(`${state.concept.replace(/\s+/g, '_')}_flashcards.pdf`);
-    }
-
-    if (type === 'quiz' && state.quizData) {
-      doc.setFontSize(16);
-      doc.text(state.quizData.title || `Quiz: ${state.concept}`, margin, y);
-      y += 15;
-
-      doc.setFontSize(11);
-      state.quizData.questions.forEach((q, i) => {
-        const isAnswered = state.quizAnswered[i] !== null;
-        const correctStatus = isAnswered 
-          ? (state.quizAnswered[i] === q.correct ? " [Correct]" : " [Wrong]")
-          : " [Unanswered]";
-
-        const qLines = doc.splitTextToSize(`${i + 1}. ${q.question}${correctStatus}`, 180);
-        
-        let blockHeight = qLines.length * 6 + (q.options.length * 6) + 15;
-        if (isAnswered) {
-          const expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 170);
-          blockHeight += expLines.length * 6 + 5;
-        }
-
-        if (y + blockHeight > 280) {
-          doc.addPage();
-          y = 20;
-        }
-
-        doc.setFont("helvetica", "bold");
-        doc.text(qLines, margin, y);
-        y += qLines.length * 6;
-
-        doc.setFont("helvetica", "normal");
-        q.options.forEach((opt, optIdx) => {
-          // Safe ASCII alternative to Unicode checkmarks/circles
-          let mark = "[ ]";
-          if (isAnswered) {
-            if (optIdx === q.correct) mark = "[X]"; // Correct answer
-            else if (optIdx === state.quizAnswered[i]) mark = "[~]"; // Wrong pick
-          }
-          const optLines = doc.splitTextToSize(`${mark} ${opt}`, 170);
-          doc.text(optLines, margin + 5, y);
-          y += optLines.length * 6;
-        });
-
-        if (isAnswered) {
-          y += 5;
-          doc.setFont("helvetica", "italic");
-          const expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 170);
-          doc.text(expLines, margin + 5, y);
-          y += expLines.length * 6;
-        }
-        y += 10;
-      });
-      doc.save(`${state.concept.replace(/\s+/g, '_')}_quiz.pdf`);
-    }
-  }
-
-  // ── Stage Flow Logic ───────────────────────────────────────────────────────
-  async function submitSetup() {
-    state.concept = document.getElementById("conceptInput").value.trim();
-    state.background = document.getElementById("backgroundInput").value.trim();
-    state.goal = document.getElementById("goalInput").value.trim() || "General understanding";
-
-    if (!state.concept || !state.background) {
-      showToast("Please fill in what you want to learn and your background.");
-      return;
-    }
-
-    goToStage(1);
-    const loading = document.getElementById("s1-loading");
-    loading.style.display = "flex";
-    document.getElementById("s1-content").style.display = "none";
-
-    try {
-      const quiz = await AI.generatePriorQuiz(state);
-      state.priorQuiz = quiz;
-      state.priorAnswers = new Array(quiz.length).fill(null);
-      renderPriorQuiz(quiz);
-      loading.style.display = "none";
-      document.getElementById("s1-content").style.display = "block";
-    } catch (e) {
-      handleError(e, "s1-loading");
-    }
-  }
-
-  function renderPriorQuiz(quiz) {
-    const c = document.getElementById("pq-container");
-    c.innerHTML = "";
-    quiz.forEach((q, i) => {
-      let html = `<div class="pq-question">
-        <div class="pq-q-num">Question ${i+1} of 5</div>
-        <div class="pq-q-text">${q.question}</div>
-        <div class="pq-options">`;
-      q.options.forEach((opt, j) => {
-        const letter = String.fromCharCode(65 + j);
-        html += `<div class="pq-option" onclick="App.selectPq(${i}, ${j})" id="pq-${i}-${j}">
-          <span class="pq-opt-letter">${letter}</span>
-          <span>${opt}</span>
-        </div>`;
-      });
-      html += `</div></div>`;
-      c.innerHTML += html;
-    });
-  }
-
-  function selectPq(qIndex, optIndex) {
-    state.priorAnswers[qIndex] = optIndex;
-    const qDiv = document.querySelectorAll('.pq-question')[qIndex];
-    const opts = qDiv.querySelectorAll('.pq-option');
-    opts.forEach(o => o.classList.remove('selected'));
-    document.getElementById(`pq-${qIndex}-${optIndex}`).classList.add('selected');
-
-    const done = state.priorAnswers.filter(a => a !== null).length;
-    const btn = document.getElementById("s1-btn");
-    if (done === 5) {
-      btn.disabled = false;
-      btn.textContent = "Analyze My Answers →";
-    }
-  }
-
-  async function submitPriorQuiz() {
-    goToStage(2);
-    const loading = document.getElementById("s2-loading");
-    loading.style.display = "flex";
-    document.getElementById("s2-content").style.display = "none";
-
-    try {
-      state.gapAnalysis = await AI.analyzeGaps(state);
-      document.getElementById("gapAnalysisOutput").innerHTML = state.gapAnalysis;
-      
-      state.explanation = await AI.explainConcept(state);
-      document.getElementById("explanationOutput").innerHTML = state.explanation;
-
-      loading.style.display = "none";
-      document.getElementById("s2-content").style.display = "block";
-    } catch (e) {
-      handleError(e, "s2-loading");
-    }
-  }
-
-  async function startStressTest() {
-    goToStage(3);
-    const loading = document.getElementById("s3-loading");
-    loading.style.display = "flex";
-    document.getElementById("s3-content").style.display = "none";
-
-    try {
-      state.stressQuestions = await AI.generateStressTest(state);
-      renderStressTest(state.stressQuestions);
-      loading.style.display = "none";
-      document.getElementById("s3-content").style.display = "block";
-    } catch (e) {
-      handleError(e, "s3-loading");
-    }
-  }
-
-  function renderStressTest(questions) {
-    const c = document.getElementById("stressTestContainer");
-    c.innerHTML = "";
-    questions.forEach((q, i) => {
-      c.innerHTML += `
-        <div class="stress-question">
-          <div class="stress-q-number">Question ${i+1} • ${q.type}</div>
-          <div class="stress-q-text">${q.question}</div>
-          <textarea class="stress-q-input" id="stress-a-${i}" placeholder="Your answer..."></textarea>
-        </div>
-      `;
-    });
-  }
-
-  async function submitStressTest() {
-    const answers = [];
-    let empty = false;
-    for (let i = 0; i < state.stressQuestions.length; i++) {
-      const val = document.getElementById(`stress-a-${i}`).value.trim();
-      if (!val) empty = true;
-      answers.push(val);
-    }
-    if (empty) {
-      showToast("Please attempt all stress test questions.");
-      return;
-    }
-    state.stressAnswers = answers;
-
-    goToStage(4);
-    const loading = document.getElementById("s4-loading");
-    loading.style.display = "flex";
-    document.getElementById("s4-content").style.display = "none";
-
-    try {
-      state.stressResult = await AI.evaluateStressTest(state);
-      document.getElementById("stressEvalOutput").innerHTML = state.stressResult;
-      loading.style.display = "none";
-      document.getElementById("s4-content").style.display = "block";
-    } catch (e) {
-      handleError(e, "s4-loading");
-    }
-  }
-
-  function goToFinalTeachBack() {
-    goToStage(5);
-  }
-
-  async function submitFinalTeachBack() {
-    state.finalTeachBack = document.getElementById("finalTeachBackInput").value.trim();
-    if (!state.finalTeachBack || state.finalTeachBack.length < 20) {
-      showToast("Please provide a more detailed explanation.");
-      return;
-    }
-
-    goToStage(6);
-    const loading = document.getElementById("s6-loading");
-    loading.style.display = "flex";
-    document.getElementById("s6-content").style.display = "none";
-
-    try {
-      const result = await AI.scoreFinalTeachBack(state);
-      state.score = result.score;
-      
-      const scoreNum = document.getElementById("finalScoreNum");
-      scoreNum.textContent = "0";
-      document.getElementById("finalScoreLabel").innerHTML = `<strong>${result.label}</strong><br>Based on your gap progression`;
-      document.getElementById("finalFeedback").innerHTML = `<p>${result.feedback}</p>`;
-      
-      loading.style.display = "none";
-      document.getElementById("s6-content").style.display = "block";
-
-      // Animate score
-      let start = 0;
-      const end = result.score;
-      const duration = 1500;
-      const step = (timestamp) => {
-        if (!start) start = timestamp;
-        const progress = Math.min((timestamp - start) / duration, 1);
-        const easeOut = 1 - Math.pow(1 - progress, 3);
-        scoreNum.textContent = Math.floor(easeOut * end);
-        if (progress < 1) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-
-    } catch (e) {
-      handleError(e, "s6-loading");
-    }
-  }
-
-  async function selectArtifact(type) {
-    document.querySelectorAll(".artifact-card").forEach(c => c.classList.remove("selected"));
-    document.querySelector(`[data-artifact="${type}"]`).classList.add("selected");
-    
-    state.currentArtifactType = type;
-    const wrap = document.getElementById("artifactOutputWrap");
-    const out = document.getElementById("artifactOutput");
-    const load = document.getElementById("artifactLoading");
-    const loadText = document.getElementById("artifactLoadingText");
-    
-    wrap.style.display = "block";
-    out.style.display = "none";
-    load.style.display = "flex";
-    loadText.textContent = `Generating your ${type}...`;
-    
-    // Clear out any old download bar so it doesn't pile up
-    const oldBar = document.getElementById("dynamic-download-bar");
-    if (oldBar) oldBar.remove();
-
-    try {
-      const result = await AI.generateArtifact({ ...state, type });
-      
-      if (type === 'flashcards') {
-        state.flashcardData = result.data;
-        renderFlashcards(result.data, out);
-      } else if (type === 'quiz') {
-        state.quizData = result.data;
-        state.quizAnswered = new Array(result.data.questions.length).fill(null);
-        state.quizCorrect = 0;
-        renderArtifactQuiz(result.data, out);
-      } else {
-        out.innerHTML = result.data; // HTML mapping
+      if (y + blockHeight > 280) {
+        doc.addPage();
+        y = 20;
       }
-      
-      load.style.display = "none";
-      out.style.display = "block";
-      
-      // Inject the download bar below the artifact
-      renderDownloadBar(type, out);
 
-    } catch (e) {
-      load.style.display = "none";
-      out.style.display = "block";
-      handleError(e, "artifactOutput");
-    }
-  }
+      doc.setFont("helvetica", "bold");
+      doc.text(qLines, margin, y);
+      y += qLines.length * 6;
 
-  function renderFlashcards(cards, container) {
-    let html = `<div class="flashcard-grid">`;
-    cards.forEach((c, i) => {
-      html += `
-        <div class="flip-card" onclick="this.classList.toggle('flipped')">
-          <div class="flip-card-inner">
-            <div class="flip-card-front">
-              <div class="flip-card-label">Flashcard ${i+1} • Question</div>
-              <p>${c.front}</p>
-            </div>
-            <div class="flip-card-back">
-              <div class="flip-card-label">Answer</div>
-              <p>${c.back}</p>
-            </div>
-          </div>
-        </div>
-      `;
+      doc.setFont("helvetica", "normal");
+      doc.text(aLines, margin, y);
+      y += aLines.length * 6 + 8;
     });
-    html += `</div>`;
-    container.innerHTML = html;
+    doc.save(`${state.concept.replace(/\s+/g,'-')}-flashcards.pdf`);
+    showToast("Flashcards PDF saved!");
   }
 
-  function renderArtifactQuiz(data, container) {
-    let html = `<div class="quiz-header">
-      <h3 style="margin:0;color:var(--text)">${data.title || "Final Assessment"}</h3>
-      <div class="quiz-progress" id="quiz-score">Score: 0 / ${data.questions.length}</div>
-    </div>`;
-    
-    data.questions.forEach((q, i) => {
-      html += `<div class="quiz-question" id="quiz-q-${i}">
-        <div class="quiz-q-num">Question ${i+1}</div>
-        <div class="quiz-q-text">${q.question}</div>
-        <div class="quiz-options">`;
-      q.options.forEach((opt, j) => {
-        const letter = String.fromCharCode(65 + j);
-        html += `<button class="quiz-option" onclick="App.answerQuiz(${i}, ${j})" id="quiz-opt-${i}-${j}">
-          <span class="quiz-opt-letter">${letter}</span>
-          <span>${opt}</span>
-        </button>`;
-      });
-      html += `</div>
-        <div class="quiz-explanation hidden" id="quiz-exp-${i}">${q.explanation}</div>
-      </div>`;
-    });
-    
-    container.innerHTML = html;
-  }
+  function downloadQuizPDF() {
+    if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded. Please refresh."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const qd = state.quizData;
+    const margin = 15;
+    let y = 20;
 
-  function answerQuiz(qIndex, optIndex) {
-    if (state.quizAnswered[qIndex] !== null) return; // already answered
-    
-    state.quizAnswered[qIndex] = optIndex;
-    const qData = state.quizData.questions[qIndex];
-    const isCorrect = optIndex === qData.correct;
-    
-    if (isCorrect) state.quizCorrect++;
-    document.getElementById("quiz-score").textContent = `Score: ${state.quizCorrect} / ${state.quizData.questions.length}`;
-    
-    // Disable all options for this question
-    const qDiv = document.getElementById(`quiz-q-${qIndex}`);
-    const btns = qDiv.querySelectorAll('.quiz-option');
-    btns.forEach((b, j) => {
-      b.disabled = true;
-      if (j === qData.correct) b.classList.add('correct');
-      else if (j === optIndex && !isCorrect) {
-        b.classList.add('wrong');
-        b.classList.add('shake'); // Adds shake animation to the wrong answer
+    doc.setFontSize(16);
+    doc.text(qd.title || `Quiz: ${state.concept}`, margin, y);
+    y += 15;
+
+    doc.setFontSize(11);
+    qd.questions.forEach((q, qi) => {
+      const isAnswered = state.quizAnswered[qi] !== null;
+      const correctStatus = isAnswered 
+        ? (state.quizAnswered[qi] === q.correct ? " [Correct]" : " [Wrong]")
+        : "";
+
+      const qLines = doc.splitTextToSize(`${qi + 1}. ${q.question}${correctStatus}`, 180);
+      let blockHeight = qLines.length * 6 + (q.options.length * 6) + 15;
+      if (isAnswered) {
+        const expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 170);
+        blockHeight += expLines.length * 6 + 5;
       }
+
+      if (y + blockHeight > 280) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.text(qLines, margin, y);
+      y += qLines.length * 6;
+
+      doc.setFont("helvetica", "normal");
+      q.options.forEach((opt, oi) => {
+        let mark = "[ ]";
+        if (isAnswered) {
+          if (oi === q.correct) mark = "[X]"; 
+          else if (oi === state.quizAnswered[qi]) mark = "[~]"; 
+        }
+        const optLines = doc.splitTextToSize(`${mark} ${String.fromCharCode(65+oi)}. ${opt}`, 170);
+        doc.text(optLines, margin + 5, y);
+        y += optLines.length * 6;
+      });
+
+      if (isAnswered) {
+        y += 5;
+        doc.setFont("helvetica", "italic");
+        const expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 170);
+        doc.text(expLines, margin + 5, y);
+        y += expLines.length * 6;
+      }
+      y += 10;
     });
-    
-    // Show explanation
-    const exp = document.getElementById(`quiz-exp-${qIndex}`);
-    exp.classList.remove('hidden');
+    doc.save(`${state.concept.replace(/\s+/g,'-')}-quiz.pdf`);
+    showToast("Quiz PDF saved!");
   }
 
+  // ── Restart ───────────────────────────────────────────────────────────────
   function restart() {
-    window.location.reload();
+    Object.assign(state, {
+      concept:"", background:"", goal:"", priorQuiz:[], priorAnswers:[],
+      gapAnalysis:"", explanation:"", stressQuestions:[], stressAnswers:[],
+      stressResult:"", finalTeachBack:"", score:0, currentStage:0,
+      currentArtifactType:null, flashcardData:null, quizData:null, quizAnswered:[], quizCorrect:0
+    });
+
+    ["conceptInput","backgroundInput","goalInput","finalTeachInput"]
+      .forEach(id => { const el = document.getElementById(id); if(el) el.value = ""; });
+
+    const pql = document.getElementById("priorQuizLoading");
+    const pqw = document.getElementById("priorQuizWrap");
+    const pqb = document.getElementById("priorQuizBtns");
+    if (pql) { pql.style.display = "flex"; pql.innerHTML = `<div class="loading-dots"><span></span><span></span><span></span></div><p>Generating your diagnostic quiz...</p>`; }
+    if (pqw) { pqw.style.display = "none"; pqw.innerHTML = ""; }
+    if (pqb)   pqb.style.display = "none";
+
+    resetAICard("gapLoading","gapContent");
+    resetAICard("explanationLoading","explanationContent");
+    const sl = document.getElementById("stressLoading");
+    const sq = document.getElementById("stressQuestions");
+    if (sl) sl.style.display = "flex";
+    if (sq) { sq.style.display = "none"; sq.innerHTML = ""; }
+
+    ["gapBtns","explanationBtns","stressBtns"].forEach(id => {
+      const el = document.getElementById(id); if(el) el.style.display = "none";
+    });
+    const src = document.getElementById("stressResultCard");
+    const swr = document.getElementById("scoreResultWrap");
+    const aow = document.getElementById("artifactOutputWrap");
+    const ao  = document.getElementById("artifactOutput");
+    if (src) src.style.display = "none";
+    if (swr) swr.style.display = "none";
+    if (aow) aow.style.display = "none";
+    if (ao)  ao.innerHTML = "";
+    document.querySelectorAll(".artifact-card").forEach(c => c.classList.remove("selected"));
+
+    goToStage(0);
   }
 
-  return { 
-    init, submitSetup, selectPq, submitPriorQuiz, 
-    startStressTest, submitStressTest, goToFinalTeachBack, 
-    submitFinalTeachBack, selectArtifact, answerQuiz, restart 
+  // ── UI Helpers ────────────────────────────────────────────────────────────
+  function showAIResult(loadingId, contentId, html) {
+    document.getElementById(loadingId).style.display = "none";
+    const c = document.getElementById(contentId);
+    c.style.display = "block"; c.innerHTML = html;
+  }
+
+  function resetAICard(loadingId, contentId) {
+    const l = document.getElementById(loadingId);
+    const c = document.getElementById(contentId);
+    if (l) l.style.display = "flex";
+    if (c) { c.style.display = "none"; c.innerHTML = ""; }
+  }
+
+  function shakeInput(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.animation = "none"; el.offsetHeight;
+    el.style.animation = "shake 0.4s ease"; el.focus();
+    setTimeout(() => el.style.animation = "", 400);
+  }
+
+  function showInputHint(id, msg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let hint = el.nextElementSibling;
+    if (!hint || !hint.classList.contains("input-error")) {
+      hint = document.createElement("p");
+      hint.className = "input-error";
+      hint.style.cssText = "color:#ff6b6b;font-size:0.78rem;margin-top:0.3rem;font-family:var(--font-mono)";
+      el.parentNode.insertBefore(hint, el.nextSibling);
+    }
+    hint.textContent = msg;
+    setTimeout(() => { if (hint.parentNode) hint.parentNode.removeChild(hint); }, 3000);
+  }
+
+  // Ensure handleError is updated at bottom as well
+  function handleError(err, loadingId) {
+    const el = document.getElementById(loadingId);
+    if (!el) return;
+    let msg = err.message || "Unknown error";
+    if (msg.includes("Quota exceeded") || msg.includes("limit: 0")) {
+      msg = "API Quota Exceeded. Please verify your model is set to a free-tier limit.";
+    } else if (msg.length > 150) {
+      msg = msg.substring(0, 150) + "..."; 
+    }
+    el.innerHTML = `<p style="color:#ff6b6b;font-family:var(--font-mono);font-size:0.85rem;text-align:center">Error: ${msg}</p>`;
+  }
+
+  document.addEventListener("DOMContentLoaded", init);
+
+  // EXACTLY matching original exports
+  return {
+    start, goToStage, goToStage2,
+    selectPriorOption, submitPriorQuiz,
+    explainConcept, stressTest,
+    evaluateStressTest, scoreFinalTeachBack,
+    goToArtifacts, selectArtifact,
+    answerQuizOption, downloadArtifact, restart
   };
 
 })();
-
-window.addEventListener('DOMContentLoaded', App.init);
