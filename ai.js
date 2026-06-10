@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────
-   UNDERSTANDING AUDITOR — ai.js v3
-   Changes: prior quiz, JSON artifacts, fence stripping
+   UNDERSTANDING AUDITOR — ai.js v4
+   Changes: Aggressive fence stripping, fixed text wall formatting
 ───────────────────────────────────────── */
 
 const AI = (() => {
@@ -20,10 +20,8 @@ const AI = (() => {
   }
 
   function stripFences(raw) {
-    return raw
-      .replace(/^```[\w]*\s*\n?/gm, '')
-      .replace(/\n?```\s*$/gm, '')
-      .trim();
+    // Aggressively strips ```html, ```json, ```css, and plain ``` anywhere in the string
+    return raw.replace(/```[a-zA-Z0-9-]*\n?/g, '').replace(/```/g, '').trim();
   }
 
   function parseJSON(raw) {
@@ -38,17 +36,22 @@ const AI = (() => {
   }
 
   function renderText(raw) {
-    return raw
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm,  '<h3>$1</h3>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/^\s*[-•]\s+(.+)$/gm, '<li>$1</li>')
-      .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-      .replace(/^\d+\.\s+(.+)$/gm, '<li>$1</li>')
+    let clean = stripFences(raw);
+    
+    clean = clean.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                 .replace(/^## (.+)$/gm,  '<h3>$1</h3>')
+                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                 .replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Handle bullets accurately without breaking lists
+    clean = clean.replace(/^\s*[-•*]\s+(.+)$/gm, '<li>$1</li>')
+                 .replace(/(<li>.*<\/li>\n*)+/g, '<ul>$&</ul>');
+
+    // Safe paragraph splitting
+    return clean
       .split(/\n{2,}/)
       .map(p => p.trim()).filter(Boolean)
-      .map(p => p.startsWith('<') ? p : `<p>${p.replace(/\n/g, ' ')}</p>`)
+      .map(p => (p.startsWith('<h') || p.startsWith('<u') || p.startsWith('<l')) ? p : `<p>${p.replace(/\n/g, ' ')}</p>`)
       .join('\n');
   }
 
