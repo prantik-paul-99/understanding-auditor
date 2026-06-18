@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────
-   UNDERSTANDING AUDITOR — app.js v4
-   Changes: ONLY Bug Fixes (Error intercepts, Image crop fix, PDF fixes)
+   UNDERSTANDING AUDITOR — app.js (FINAL)
+   Changes: Isolated capture zones, unified dark-theme PDFs, UI label fixes
 ───────────────────────────────────────── */
 
 const App = (() => {
@@ -29,6 +29,15 @@ const App = (() => {
   const TOTAL_STAGES = 6;
 
   function init() {
+    // FIX: Safely update UI text to say "Downloads as PDF" without breaking layout
+    const targets = ['slides', 'explainer', 'flashcards', 'quiz'];
+    targets.forEach(type => {
+      const el = document.querySelector(`[data-artifact="${type}"] .artifact-desc`);
+      if (el && el.textContent.includes("HTML")) {
+        el.textContent = el.textContent.replace("HTML", "PDF");
+      }
+    });
+
     requestAnimationFrame(() => {
       const s = document.getElementById("stage-0");
       if (s) { s.classList.add("active"); setTimeout(() => s.classList.add("visible"), 30); }
@@ -279,7 +288,7 @@ const App = (() => {
     const timer = setInterval(() => { current = Math.min(current + step, target); el.textContent = current; if (current >= target) clearInterval(timer); }, 30);
   }
 
-  // ── Stage 7: Artifacts ────────────────────────────────────────────────────
+  // ── Stage 7: Artifacts (ISOLATED DOM ARCHITECTURE) ────────────────────────
   function goToArtifacts() { goToStage(7); }
 
   function selectArtifact(type) {
@@ -302,19 +311,25 @@ const App = (() => {
     AI.generateArtifact({ type, concept: state.concept, background: state.background, explanation: state.explanation, gapAnalysis: state.gapAnalysis, finalTeachBack: state.finalTeachBack, score: state.score })
       .then(result => {
         loading.style.display = "none";
+        output.style.display = "block";
+        
+        // FIX: Create an isolated capture zone. This prevents layout shifts and protects the button.
+        output.innerHTML = `
+          <div id="captureZone" style="background:var(--bg-2); border-radius:8px; padding:1.5rem;">
+            ${result.type === 'json' ? '' : result.data}
+          </div>
+          <div class="download-bar" style="margin-top:1.5rem; display:flex; justify-content:flex-end;">
+            <button class="btn-download" onclick="App.downloadArtifact()">
+              ⬇ Download ${['mindmap', 'infographic'].includes(type) ? 'Image' : 'PDF'}
+            </button>
+          </div>
+        `;
+
         if (result.type === 'json') {
           if (result.subtype === 'flashcards') renderFlashcards(result.data);
           else if (result.subtype === 'quiz')  renderArtifactQuiz(result.data);
-        } else {
-          output.style.display = "block";
-          const dlLabel = (type === 'slides' || type === 'explainer') ? '⬇ Download PDF' : '⬇ Download as Image (PNG)';
-          output.innerHTML = result.data + `<div class="download-bar"><button class="btn-download" onclick="App.downloadArtifact()">${dlLabel}</button></div>`;
         }
       })
-      // .catch(err => {
-      //   loading.style.display = "none"; output.style.display = "block";
-      //   output.innerHTML = `<p style="color:#ff6b6b">Error generating artifact: ${err.message}</p>`;
-      // });
       .catch(err => {
         loading.style.display = "none"; output.style.display = "block";
         handleError(err, "artifactOutput");
@@ -324,9 +339,8 @@ const App = (() => {
   // ── Flashcard Renderer ─────────────────────────────────────────────────────
   function renderFlashcards(data) {
     state.flashcardData = data;
-    const output = document.getElementById("artifactOutput");
-    output.style.display = "block";
-    output.innerHTML = `
+    const zone = document.getElementById("captureZone");
+    zone.innerHTML = `
       <div style="margin-bottom:1.2rem">
         <h2 style="font-family:var(--font-display);color:var(--gold);font-size:1.5rem;margin-bottom:0.3rem">Flashcards: ${state.concept}</h2>
         <p style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">Click any card to flip it and reveal the answer</p>
@@ -345,9 +359,6 @@ const App = (() => {
               </div>
             </div>
           </div>`).join('')}
-      </div>
-      <div class="download-bar">
-        <button class="btn-download" onclick="App.downloadArtifact()">⬇ Download Flashcards (PDF)</button>
       </div>`;
   }
 
@@ -356,9 +367,8 @@ const App = (() => {
     state.quizData    = data;
     state.quizAnswered = new Array(data.questions.length).fill(null);
     state.quizCorrect  = 0;
-    const output = document.getElementById("artifactOutput");
-    output.style.display = "block";
-    output.innerHTML = `
+    const zone = document.getElementById("captureZone");
+    zone.innerHTML = `
       <div class="quiz-header">
         <h2 style="font-family:var(--font-display);color:var(--gold);font-size:1.4rem">${data.title}</h2>
         <div class="quiz-progress" id="quizProgress">0/${data.questions.length} answered</div>
@@ -373,17 +383,16 @@ const App = (() => {
                 <span class="quiz-opt-letter">${String.fromCharCode(65+oi)}</span>${opt}
               </button>`).join('')}
           </div>
-          <div class="quiz-explanation" id="qe-${qi}" style="display:none">💡 ${q.explanation}</div>
+          <div class="quiz-explanation hidden" id="qe-${qi}">💡 ${q.explanation}</div>
         </div>`).join('')}
-      <div class="quiz-final" id="quizFinal" style="display:none">
+      <div class="quiz-final hidden" id="quizFinal" style="text-align: center; padding: 2rem; background: var(--bg-2); border-radius: 8px; border: 1px solid var(--border); margin-top: 1.5rem;">
         <div id="quizFinalScore"></div>
-        <button class="btn-download" onclick="App.downloadArtifact()" style="margin-top:1.2rem">⬇ Download Quiz + Answers (PDF)</button>
       </div>`;
   }
 
   function answerQuizOption(qi, oi, correct) {
     if (state.quizAnswered[qi] !== null) return;
-    state.quizAnswered[qi] = oi; // Storing the index so PDF knows what was picked
+    state.quizAnswered[qi] = oi; 
     if (oi === correct) state.quizCorrect++;
 
     document.querySelectorAll(`#qopts-${qi} .quiz-option`).forEach((btn, i) => {
@@ -391,10 +400,11 @@ const App = (() => {
       if (i === correct) btn.classList.add('correct');
       if (i === oi && oi !== correct) {
         btn.classList.add('wrong');
-        btn.classList.add('shake'); // Shake class added here
+        btn.classList.add('shake'); 
       }
     });
-    document.getElementById(`qe-${qi}`).style.display = "block";
+    
+    document.getElementById(`qe-${qi}`).classList.remove('hidden');
 
     const answeredCount = state.quizAnswered.filter(a => a !== null).length;
     const total = state.quizData.questions.length;
@@ -402,7 +412,7 @@ const App = (() => {
 
     if (answeredCount === total) {
       const final = document.getElementById("quizFinal");
-      final.style.display = "block";
+      final.classList.remove('hidden');
       const pct = state.quizCorrect / total;
       const label = pct >= 0.9 ? '🏆 Mastery' : pct >= 0.7 ? '⭐ Strong' : pct >= 0.5 ? '📈 Getting there' : '📚 Keep studying';
       document.getElementById("quizFinalScore").innerHTML = `
@@ -413,63 +423,37 @@ const App = (() => {
     }
   }
 
-  // ── Downloads (UPDATED FOR FIXES) ─────────────────────────────────────────
+  // ── Unified Downloads Pipeline ───────────────────────────────────────────
   function downloadArtifact() {
     const type = state.currentArtifactType;
+    const captureZone = document.getElementById("captureZone");
     
-    // 1. Hide the download bar so it doesn't get captured
-    const downloadBar = document.querySelector('.download-bar');
-    if (downloadBar) downloadBar.style.display = 'none';
+    if (!captureZone) { showToast("Nothing to download."); return; }
 
-    // 2. Temporarily remove max-height so image captures full scroll height
-    const out = document.getElementById("artifactOutput");
-    const oldMaxHeight = out.style.maxHeight;
-    const oldOverflow = out.style.overflow;
-    out.style.maxHeight = 'none';
-    out.style.overflow = 'visible';
+    showToast("Preparing download... please wait.");
 
-    // Helper to restore UI after generation
-    const restoreUI = () => {
-      if (downloadBar) downloadBar.style.display = 'flex';
-      out.style.maxHeight = oldMaxHeight;
-      out.style.overflow = oldOverflow;
-    };
+    // FIX: Snapshot ONLY the captureZone, leaving the button and layout totally alone.
+    // This removes the need to hide elements or break max-height bounds.
+    html2canvas(captureZone, {
+      scale: 2,
+      backgroundColor: '#0d1220',
+      useCORS: true,
+      scrollY: -window.scrollY // Fixes html2canvas cropping bug
+    }).then(canvas => {
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
 
-    if (type === 'mindmap' || type === 'infographic') {
-      if (!window.html2canvas) { showToast("Image library not loaded. Please refresh."); restoreUI(); return; }
-      showToast("Capturing image...");
-      html2canvas(out, { backgroundColor: '#0d1220', scale: 2, useCORS: true })
-        .then(canvas => {
-          const a = document.createElement('a');
-          a.download = `${state.concept.replace(/\s+/g,'-')}-${type}.png`;
-          a.href = canvas.toDataURL('image/png');
-          a.click();
-          showToast("Image saved!");
-          restoreUI();
-        })
-        .catch(() => {
-          showToast("Couldn't capture — try right-click > Save.");
-          restoreUI();
-        });
-
-    } else if (type === 'flashcards' && state.flashcardData) {
-      downloadFlashcardsPDF();
-      restoreUI();
-    } else if (type === 'quiz' && state.quizData) {
-      downloadQuizPDF();
-      restoreUI();
-    } else if (type === 'slides' || type === 'explainer') {
-      // 3. Slides and Explainer now export cleanly to PDF using html2canvas + jsPDF
-      if (!window.jspdf?.jsPDF || !window.html2canvas) { 
-         showToast("PDF libraries not loaded. Please refresh."); 
-         restoreUI(); 
-         return; 
-      }
-      showToast(`Generating ${type} PDF...`);
-      html2canvas(out, { backgroundColor: '#0d1220', scale: 2, useCORS: true }).then(canvas => {
-        const imgData = canvas.toDataURL('image/jpeg', 1.0);
+      if (type === 'mindmap' || type === 'infographic') {
+        const a = document.createElement('a');
+        a.download = `${state.concept.replace(/\s+/g,'-')}-${type}.jpg`;
+        a.href = imgData;
+        a.click();
+      } else {
+        // FIX: Push Flashcards and Quizzes into the PDF just like Slides.
+        // This guarantees the PDF keeps your CSS colors, borders, and fonts.
+        if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded. Refresh."); return; }
         const { jsPDF } = window.jspdf;
-        const orientation = type === 'slides' ? 'landscape' : 'portrait';
+
+        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
         const doc = new jsPDF({ orientation, unit: 'mm' });
         
         const pdfWidth = doc.internal.pageSize.getWidth();
@@ -477,108 +461,12 @@ const App = (() => {
         
         doc.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
         doc.save(`${state.concept.replace(/\s+/g,'-')}-${type}.pdf`);
-        showToast("PDF saved!");
-        restoreUI();
-      }).catch(() => {
-         showToast("Failed to generate PDF.");
-         restoreUI();
-      });
-    }
-  }
-
-  function downloadFlashcardsPDF() {
-    if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded. Please refresh."); return; }
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const cards = state.flashcardData;
-    const margin = 15;
-    let y = 20;
-
-    doc.setFontSize(16);
-    doc.text(`Flashcards: ${state.concept}`, margin, y);
-    y += 15;
-
-    cards.forEach((card, i) => {
-      doc.setFontSize(11);
-      const qLines = doc.splitTextToSize(`Q: ${card.front}`, 180);
-      const aLines = doc.splitTextToSize(`A: ${card.back}`, 180);
-      const blockHeight = (qLines.length + aLines.length) * 6 + 10;
-
-      if (y + blockHeight > 280) {
-        doc.addPage();
-        y = 20;
       }
-
-      doc.setFont("helvetica", "bold");
-      doc.text(qLines, margin, y);
-      y += qLines.length * 6;
-
-      doc.setFont("helvetica", "normal");
-      doc.text(aLines, margin, y);
-      y += aLines.length * 6 + 8;
+      showToast("Download complete!");
+    }).catch(err => {
+      showToast("Failed to capture artifact.");
+      console.error(err);
     });
-    doc.save(`${state.concept.replace(/\s+/g,'-')}-flashcards.pdf`);
-    showToast("Flashcards PDF saved!");
-  }
-
-  function downloadQuizPDF() {
-    if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded. Please refresh."); return; }
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const qd = state.quizData;
-    const margin = 15;
-    let y = 20;
-
-    doc.setFontSize(16);
-    doc.text(qd.title || `Quiz: ${state.concept}`, margin, y);
-    y += 15;
-
-    doc.setFontSize(11);
-    qd.questions.forEach((q, qi) => {
-      const isAnswered = state.quizAnswered[qi] !== null;
-      const correctStatus = isAnswered 
-        ? (state.quizAnswered[qi] === q.correct ? " [Correct]" : " [Wrong]")
-        : "";
-
-      const qLines = doc.splitTextToSize(`${qi + 1}. ${q.question}${correctStatus}`, 180);
-      let blockHeight = qLines.length * 6 + (q.options.length * 6) + 15;
-      if (isAnswered) {
-        const expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 170);
-        blockHeight += expLines.length * 6 + 5;
-      }
-
-      if (y + blockHeight > 280) {
-        doc.addPage();
-        y = 20;
-      }
-
-      doc.setFont("helvetica", "bold");
-      doc.text(qLines, margin, y);
-      y += qLines.length * 6;
-
-      doc.setFont("helvetica", "normal");
-      q.options.forEach((opt, oi) => {
-        let mark = "[ ]";
-        if (isAnswered) {
-          if (oi === q.correct) mark = "[X]"; 
-          else if (oi === state.quizAnswered[qi]) mark = "[~]"; 
-        }
-        const optLines = doc.splitTextToSize(`${mark} ${String.fromCharCode(65+oi)}. ${opt}`, 170);
-        doc.text(optLines, margin + 5, y);
-        y += optLines.length * 6;
-      });
-
-      if (isAnswered) {
-        y += 5;
-        doc.setFont("helvetica", "italic");
-        const expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 170);
-        doc.text(expLines, margin + 5, y);
-        y += expLines.length * 6;
-      }
-      y += 10;
-    });
-    doc.save(`${state.concept.replace(/\s+/g,'-')}-quiz.pdf`);
-    showToast("Quiz PDF saved!");
   }
 
   // ── Restart ───────────────────────────────────────────────────────────────
@@ -645,6 +533,18 @@ const App = (() => {
     setTimeout(() => el.style.animation = "", 400);
   }
 
+  function showToast(msg) {
+    let t = document.getElementById("ua-toast");
+    if (!t) {
+      t = document.createElement("div"); t.id = "ua-toast";
+      t.style.cssText = "position:fixed;bottom:2rem;left:50%;transform:translateX(-50%);background:#1a2030;border:1px solid var(--border);border-radius:8px;padding:0.75rem 1.4rem;font-family:var(--font-mono);font-size:0.82rem;color:var(--text);z-index:300;box-shadow:0 8px 30px rgba(0,0,0,0.5);transition:opacity 0.3s ease;opacity:0;pointer-events:none";
+      document.body.appendChild(t);
+    }
+    t.textContent = msg; t.style.opacity = "1";
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.style.opacity = "0"; }, 2800);
+  }
+
   function showInputHint(id, msg) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -659,7 +559,6 @@ const App = (() => {
     setTimeout(() => { if (hint.parentNode) hint.parentNode.removeChild(hint); }, 3000);
   }
 
-  // Ensure handleError is updated at bottom as well
   function handleError(err, loadingId) {
     const el = document.getElementById(loadingId);
     if (!el) return;
@@ -674,7 +573,6 @@ const App = (() => {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  // EXACTLY matching original exports
   return {
     start, goToStage, goToStage2,
     selectPriorOption, submitPriorQuiz,
