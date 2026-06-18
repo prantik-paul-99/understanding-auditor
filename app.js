@@ -459,7 +459,7 @@ const App = (() => {
     doc.save(`${state.concept.replace(/\s+/g,'-')}-flashcards.pdf`);
   }
 
-  // FIX: Native jsPDF drawing for Quizzes to perfectly preserve dark theme & boxes
+// FIX: Restored box theme, answers, color-coding, and explanations
   function generateNativePDF_Quiz() {
     if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded."); return; }
     const { jsPDF } = window.jspdf;
@@ -474,22 +474,74 @@ const App = (() => {
     y += 15;
 
     state.quizData.questions.forEach((q, qi) => {
-      const qLines = doc.splitTextToSize(`${qi+1}. ${q.question}`, 180);
-      let blockHeight = qLines.length * 7 + (q.options.length * 6) + 10;
+      const isAnswered = state.quizAnswered[qi] !== null;
+      const correctStatus = isAnswered 
+        ? (state.quizAnswered[qi] === q.correct ? "  [Correct]" : "  [Incorrect]")
+        : "";
+
+      // Calculate heights to draw the box perfectly
+      const qLines = doc.splitTextToSize(`${qi+1}. ${q.question}${correctStatus}`, 170);
+      let contentHeight = qLines.length * 7;
       
+      const optLinesArr = q.options.map((opt, oi) => {
+        let mark = "[ ]";
+        if (isAnswered) {
+          if (oi === q.correct) mark = "[✓]"; 
+          else if (oi === state.quizAnswered[qi]) mark = "[X]"; 
+        }
+        return doc.splitTextToSize(`${mark} ${String.fromCharCode(65+oi)}. ${opt}`, 160);
+      });
+      
+      optLinesArr.forEach(lines => contentHeight += lines.length * 6);
+      
+      let expLines = [];
+      if (isAnswered) {
+        contentHeight += 6; 
+        expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 165);
+        contentHeight += expLines.length * 5;
+      }
+
+      const boxPadding = 8;
+      const blockHeight = contentHeight + (boxPadding * 2);
+
+      // Paginate if box won't fit
       if (y + blockHeight > 280) { doc.addPage(); paintBackground(); y = 20; }
 
-      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
-      doc.text(qLines, 15, y);
-      y += qLines.length * 7;
+      // Draw Dark Box Theme
+      doc.setFillColor(26, 31, 46); doc.setDrawColor(232, 184, 75); doc.setLineWidth(0.5);
+      doc.rect(10, y, 190, blockHeight, 'FD');
 
-      doc.setTextColor(200, 200, 200); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+      let textY = y + boxPadding + 4;
+
+      // Print Question
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+      doc.text(qLines, 15, textY);
+      textY += qLines.length * 7 + 2;
+
+      // Print Options (Color coded if answered)
+      doc.setFont("helvetica", "normal"); doc.setFontSize(11);
       q.options.forEach((opt, oi) => {
-        const optLines = doc.splitTextToSize(`${String.fromCharCode(65+oi)}. ${opt}`, 170);
-        doc.text(optLines, 20, y);
-        y += optLines.length * 6;
+        const lines = optLinesArr[oi];
+        if (isAnswered && oi === q.correct) {
+          doc.setTextColor(160, 200, 120); // Green for correct
+        } else if (isAnswered && oi === state.quizAnswered[qi]) {
+          doc.setTextColor(255, 107, 107); // Red for wrong
+        } else {
+          doc.setTextColor(200, 200, 200); // Standard text
+        }
+        doc.text(lines, 20, textY);
+        textY += lines.length * 6;
       });
-      y += 10;
+
+      // Print Explanation
+      if (isAnswered) {
+        textY += 4;
+        doc.setTextColor(232, 184, 75); // Gold
+        doc.setFont("helvetica", "italic"); doc.setFontSize(10);
+        doc.text(expLines, 15, textY);
+      }
+
+      y += blockHeight + 6; // Move down for the next box
     });
     doc.save(`${state.concept.replace(/\s+/g,'-')}-quiz.pdf`);
   }
