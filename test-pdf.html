@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF Theme Sandbox</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { 
+      background: #0d1220; 
+      color: #fff; 
+      font-family: monospace; 
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      height: 100vh; 
+      flex-direction: column;
+    }
+    button { 
+      background: #e8b84b; 
+      color: #0d1220; 
+      border: none; 
+      padding: 1rem 2rem; 
+      font-size: 1.2rem; 
+      font-weight: bold; 
+      border-radius: 8px; 
+      cursor: pointer; 
+    }
+    button:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Isolated PDF Tester</h2>
+  <p>Tweak the JS logic in this file to test PDF layouts instantly.</p>
+  <button onclick="runTest()">Download Test PDF</button>
+
+  <script>
+    // 1. Mock the state exactly as it exists in app.js
+    const state = {
+      concept: "Developer Test",
+      quizData: {
+        title: "Quiz: PDF Layout & Theme",
+        questions: [
+          {
+            question: "Is the dark box theme rendering correctly?",
+            options: ["No, it's white", "Yes, it's dark blue with gold borders", "It's completely broken"],
+            correct: 1,
+            explanation: "Native jsPDF is now painting the background and boxes manually."
+          },
+          {
+            question: "Are the answers color-coding properly?",
+            options: ["They are all gray", "Correct is green, wrong is red", "They disappeared"],
+            correct: 1,
+            explanation: "Green means you got it right. Red means you selected the wrong option."
+          }
+        ]
+      },
+      quizAnswered: [1, 0], // Simulates answering Q1 correctly and Q2 wrong
+      quizCorrect: 1
+    };
+
+    // 2. The isolated render function
+    function runTest() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+      let y = 20;
+
+      const paintBackground = () => { doc.setFillColor(13, 18, 32); doc.rect(0, 0, 210, 297, 'F'); };
+      paintBackground();
+
+      doc.setFont("helvetica", "bold"); doc.setTextColor(232, 184, 75); doc.setFontSize(18);
+      doc.text(state.quizData.title || `Quiz: ${state.concept}`, 15, y);
+      y += 15;
+
+      state.quizData.questions.forEach((q, qi) => {
+        const isAnswered = state.quizAnswered[qi] !== null;
+        const correctStatus = isAnswered 
+          ? (state.quizAnswered[qi] === q.correct ? "  [Correct]" : "  [Incorrect]")
+          : "";
+
+        const qLines = doc.splitTextToSize(`${qi+1}. ${q.question}${correctStatus}`, 170);
+        let contentHeight = qLines.length * 7;
+        
+        const optLinesArr = q.options.map((opt, oi) => {
+          let mark = "[ ]";
+          if (isAnswered) {
+            if (oi === q.correct) mark = "[✓]"; 
+            else if (oi === state.quizAnswered[qi]) mark = "[X]"; 
+          }
+          return doc.splitTextToSize(`${mark} ${String.fromCharCode(65+oi)}. ${opt}`, 160);
+        });
+        
+        optLinesArr.forEach(lines => contentHeight += lines.length * 6);
+        
+        let expLines = [];
+        if (isAnswered) {
+          contentHeight += 6; 
+          expLines = doc.splitTextToSize(`Explanation: ${q.explanation}`, 165);
+          contentHeight += expLines.length * 5;
+        }
+
+        const boxPadding = 8;
+        const blockHeight = contentHeight + (boxPadding * 2);
+
+        if (y + blockHeight > 280) { doc.addPage(); paintBackground(); y = 20; }
+
+        doc.setFillColor(26, 31, 46); doc.setDrawColor(232, 184, 75); doc.setLineWidth(0.5);
+        doc.rect(10, y, 190, blockHeight, 'FD');
+
+        let textY = y + boxPadding + 4;
+
+        doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+        doc.text(qLines, 15, textY);
+        textY += qLines.length * 7 + 2;
+
+        doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+        q.options.forEach((opt, oi) => {
+          const lines = optLinesArr[oi];
+          if (isAnswered && oi === q.correct) {
+            doc.setTextColor(160, 200, 120); 
+          } else if (isAnswered && oi === state.quizAnswered[qi]) {
+            doc.setTextColor(255, 107, 107); 
+          } else {
+            doc.setTextColor(200, 200, 200); 
+          }
+          doc.text(lines, 20, textY);
+          textY += lines.length * 6;
+        });
+
+        if (isAnswered) {
+          textY += 4;
+          doc.setTextColor(232, 184, 75); 
+          doc.setFont("helvetica", "italic"); doc.setFontSize(10);
+          doc.text(expLines, 15, textY);
+        }
+
+        y += blockHeight + 6; 
+      });
+      
+      doc.save(`sandbox-test-quiz.pdf`);
+    }
+  </script>
+</body>
+</html>
