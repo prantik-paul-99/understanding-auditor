@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────
-   UNDERSTANDING AUDITOR — app.js (FINAL)
-   Changes: Isolated capture zones, unified dark-theme PDFs, UI label fixes
+   UNDERSTANDING AUDITOR — app.js (FINAL NATIVE PDF FIX)
+   Changes: Native jsPDF rendering, CSS injection protection
 ───────────────────────────────────────── */
 
 const App = (() => {
@@ -29,7 +29,6 @@ const App = (() => {
   const TOTAL_STAGES = 6;
 
   function init() {
-    // FIX: Safely update UI text to say "Downloads as PDF" without breaking layout
     const targets = ['slides', 'explainer', 'flashcards', 'quiz'];
     targets.forEach(type => {
       const el = document.querySelector(`[data-artifact="${type}"] .artifact-desc`);
@@ -75,10 +74,9 @@ const App = (() => {
     label.textContent = `Stage ${stage} of ${TOTAL_STAGES}`;
   }
 
-  // ── Stage 0 → 1 ───────────────────────────────────────────────────────────
+  // ── Core App Flow ─────────────────────────────────────────────────────────
   function start() { goToStage(1); }
 
-  // ── Stage 1 → 2: Validate + Generate Prior Quiz ───────────────────────────
   function goToStage2() {
     const concept    = document.getElementById("conceptInput").value.trim();
     const background = document.getElementById("backgroundInput").value.trim();
@@ -88,28 +86,25 @@ const App = (() => {
     if (!background) { shakeInput("backgroundInput"); return; }
     if (!goal)       { shakeInput("goalInput");       return; }
 
-    state.concept    = concept;
-    state.background = background;
-    state.goal       = goal;
+    state.concept = concept; state.background = background; state.goal = goal;
 
     const cd = document.getElementById("conceptDisplay");
     const cd2 = document.getElementById("conceptDisplay2");
-    if (cd)  cd.textContent  = concept;
+    if (cd) cd.textContent = concept;
     if (cd2) cd2.textContent = concept;
 
-    // Reset prior quiz UI
     const pql = document.getElementById("priorQuizLoading");
     const pqw = document.getElementById("priorQuizWrap");
     const pqb = document.getElementById("priorQuizBtns");
     if (pql) { pql.style.display = "flex"; pql.innerHTML = `<div class="loading-dots"><span></span><span></span><span></span></div><p>Generating your diagnostic quiz...</p>`; }
     if (pqw) { pqw.style.display = "none"; pqw.innerHTML = ""; }
-    if (pqb)   pqb.style.display = "none";
+    if (pqb) pqb.style.display = "none";
 
     goToStage(2);
 
     AI.generatePriorQuiz({ concept, background })
       .then(questions => {
-        state.priorQuiz    = questions;
+        state.priorQuiz = questions;
         state.priorAnswers = new Array(questions.length).fill(null);
         renderPriorQuiz(questions);
       })
@@ -147,20 +142,10 @@ const App = (() => {
     state.priorAnswers[qi] = oi;
   }
 
-  // ── Stage 2 → 3: Submit + Analyze Gaps ────────────────────────────────────
   function submitPriorQuiz() {
-    if (state.priorAnswers.filter(a => a !== null).length === 0) {
-      showToast("Answer at least one question to continue.");
-      return;
-    }
+    if (state.priorAnswers.filter(a => a !== null).length === 0) { showToast("Answer at least one question to continue."); return; }
     goToStage(3);
-    AI.analyzeGaps({
-      concept:      state.concept,
-      background:   state.background,
-      goal:         state.goal,
-      priorQuiz:    state.priorQuiz,
-      priorAnswers: state.priorAnswers
-    })
+    AI.analyzeGaps({ concept: state.concept, background: state.background, goal: state.goal, priorQuiz: state.priorQuiz, priorAnswers: state.priorAnswers })
     .then(html => {
       state.gapAnalysis = html;
       showAIResult("gapLoading", "gapContent", html);
@@ -169,17 +154,9 @@ const App = (() => {
     .catch(err => handleError(err, "gapLoading"));
   }
 
-  // ── Stage 3 → 4: Explain ──────────────────────────────────────────────────
   function explainConcept() {
     goToStage(4);
-    AI.explainConcept({
-      concept:      state.concept,
-      background:   state.background,
-      goal:         state.goal,
-      gapAnalysis:  state.gapAnalysis,
-      priorQuiz:    state.priorQuiz,
-      priorAnswers: state.priorAnswers
-    })
+    AI.explainConcept({ concept: state.concept, background: state.background, goal: state.goal, gapAnalysis: state.gapAnalysis, priorQuiz: state.priorQuiz, priorAnswers: state.priorAnswers })
     .then(html => {
       state.explanation = html;
       showAIResult("explanationLoading", "explanationContent", html);
@@ -188,14 +165,9 @@ const App = (() => {
     .catch(err => handleError(err, "explanationLoading"));
   }
 
-  // ── Stage 4 → 5: Stress Test ──────────────────────────────────────────────
   function stressTest() {
     goToStage(5);
-    AI.generateStressTest({
-      concept:     state.concept,
-      background:  state.background,
-      gapAnalysis: state.gapAnalysis
-    })
+    AI.generateStressTest({ concept: state.concept, background: state.background, gapAnalysis: state.gapAnalysis })
     .then(questions => {
       state.stressQuestions = questions;
       renderStressQuestions(questions);
@@ -216,12 +188,8 @@ const App = (() => {
     document.getElementById("stressBtns").style.display = "flex";
   }
 
-  // ── Stage 5 → 6: Evaluate ─────────────────────────────────────────────────
   function evaluateStressTest() {
-    const answers = state.stressQuestions.map((_, i) => {
-      const el = document.getElementById(`stress-answer-${i}`);
-      return el ? el.value.trim() : "";
-    });
+    const answers = state.stressQuestions.map((_, i) => { const el = document.getElementById(`stress-answer-${i}`); return el ? el.value.trim() : ""; });
     if (answers.every(a => a === "")) { showToast("Answer at least one question before submitting."); return; }
     state.stressAnswers = answers;
 
@@ -249,7 +217,6 @@ const App = (() => {
       });
   }
 
-  // ── Score Final Teach-Back ─────────────────────────────────────────────────
   function scoreFinalTeachBack() {
     const final = document.getElementById("finalTeachInput").value.trim();
     if (final.length < 40) { shakeInput("finalTeachInput"); showInputHint("finalTeachInput", "Write more — explain it as if teaching someone."); return; }
@@ -301,10 +268,13 @@ const App = (() => {
     const output      = document.getElementById("artifactOutput");
     const loadingText = document.getElementById("artifactLoadingText");
 
-    const labels = { mindmap:"Building your concept map...", infographic:"Designing your infographic...", flashcards:"Generating your flashcard set...", slides:"Creating your slide deck...", explainer:"Writing your explainer article...", quiz:"Building your quiz..." };
-
-    outputWrap.style.display = "block"; loading.style.display = "flex";
-    output.style.display = "none"; output.innerHTML = "";
+    outputWrap.style.minHeight = "400px"; 
+    outputWrap.style.display = "block"; 
+    loading.style.display = "flex";
+    output.style.display = "none"; 
+    output.innerHTML = "";
+    
+    const labels = { mindmap:"Building concept map...", infographic:"Designing infographic...", flashcards:"Generating flashcards...", slides:"Creating slide deck...", explainer:"Writing article...", quiz:"Building quiz..." };
     loadingText.textContent = labels[type] || "Generating...";
     outputWrap.scrollIntoView({ behavior: "smooth", block: "start" });
 
@@ -313,37 +283,47 @@ const App = (() => {
         loading.style.display = "none";
         output.style.display = "block";
         
-        // FIX: Create an isolated capture zone. This prevents layout shifts and protects the button.
+        let safeHTML = "";
+        if (result.type === 'html') {
+          // FIX: Strip global CSS tags so the Explainer doesn't hijack the page layout
+          safeHTML = result.data.replace(/body\s*\{/g, '#captureZone {').replace(/html\s*\{/g, '#captureZone {');
+        }
+
         output.innerHTML = `
-          <div id="captureZone" style="background:var(--bg-2); border-radius:8px; padding:1.5rem;">
-            ${result.type === 'json' ? '' : result.data}
+          <div id="captureZone" style="background:var(--bg-2); border-radius:8px; padding:1.5rem; overflow:hidden;">
+            ${result.type === 'json' ? '' : safeHTML}
           </div>
           <div class="download-bar" style="margin-top:1.5rem; display:flex; justify-content:flex-end;">
             <button class="btn-download" onclick="App.downloadArtifact()">
-              ⬇ Download ${['mindmap', 'infographic'].includes(type) ? 'Image' : 'PDF'}
+              ⬇ Download ${['mindmap', 'infographic'].includes(type) ? 'Image (PNG)' : 'PDF'}
             </button>
           </div>
         `;
 
         if (result.type === 'json') {
-          if (result.subtype === 'flashcards') renderFlashcards(result.data);
-          else if (result.subtype === 'quiz')  renderArtifactQuiz(result.data);
+          if (result.subtype === 'flashcards') {
+            state.flashcardData = result.data;
+            document.getElementById("captureZone").innerHTML = buildFlashcardsHTML(result.data);
+          } else if (result.subtype === 'quiz') {
+            state.quizData = result.data;
+            state.quizAnswered = new Array(result.data.questions.length).fill(null);
+            state.quizCorrect = 0;
+            document.getElementById("captureZone").innerHTML = buildQuizHTML(result.data);
+          }
         }
       })
       .catch(err => {
         loading.style.display = "none"; output.style.display = "block";
-        handleError(err, "artifactOutput");
+        handleError(err, "artifactLoading");
       });
   }
 
-  // ── Flashcard Renderer ─────────────────────────────────────────────────────
-  function renderFlashcards(data) {
-    state.flashcardData = data;
-    const zone = document.getElementById("captureZone");
-    zone.innerHTML = `
+  // ── HTML Builders ──────────────────────────────────────────────────────────
+  function buildFlashcardsHTML(data) {
+    return `
       <div style="margin-bottom:1.2rem">
         <h2 style="font-family:var(--font-display);color:var(--gold);font-size:1.5rem;margin-bottom:0.3rem">Flashcards: ${state.concept}</h2>
-        <p style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">Click any card to flip it and reveal the answer</p>
+        <p style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim)">Click any card to flip it</p>
       </div>
       <div class="flashcard-grid">
         ${data.map((card, i) => `
@@ -362,13 +342,8 @@ const App = (() => {
       </div>`;
   }
 
-  // ── Quiz Renderer ──────────────────────────────────────────────────────────
-  function renderArtifactQuiz(data) {
-    state.quizData    = data;
-    state.quizAnswered = new Array(data.questions.length).fill(null);
-    state.quizCorrect  = 0;
-    const zone = document.getElementById("captureZone");
-    zone.innerHTML = `
+  function buildQuizHTML(data) {
+    return `
       <div class="quiz-header">
         <h2 style="font-family:var(--font-display);color:var(--gold);font-size:1.4rem">${data.title}</h2>
         <div class="quiz-progress" id="quizProgress">0/${data.questions.length} answered</div>
@@ -419,7 +394,6 @@ const App = (() => {
         <span style="font-size:3rem;font-family:var(--font-display);color:var(--gold);font-weight:900">${state.quizCorrect}</span>
         <span style="font-size:1.5rem;color:var(--text-dim)">/${total}</span>
         <span style="font-family:var(--font-mono);color:var(--teal);font-size:1rem;margin-left:1rem">${label}</span>`;
-      final.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }
 
@@ -427,45 +401,135 @@ const App = (() => {
   function downloadArtifact() {
     const type = state.currentArtifactType;
     const captureZone = document.getElementById("captureZone");
-    
     if (!captureZone) { showToast("Nothing to download."); return; }
 
-    showToast("Preparing download... please wait.");
+    showToast("Generating file, please wait...");
 
-    // FIX: Snapshot ONLY the captureZone, leaving the button and layout totally alone.
-    // This removes the need to hide elements or break max-height bounds.
-    html2canvas(captureZone, {
-      scale: 2,
-      backgroundColor: '#0d1220',
-      useCORS: true,
-      scrollY: -window.scrollY // Fixes html2canvas cropping bug
-    }).then(canvas => {
-      const imgData = canvas.toDataURL('image/jpeg', 1.0);
-
-      if (type === 'mindmap' || type === 'infographic') {
+    if (type === 'flashcards') {
+      generateNativePDF_Flashcards();
+    } else if (type === 'quiz') {
+      generateNativePDF_Quiz();
+    } else if (type === 'slides' || type === 'explainer') {
+      generateOffscreenPDF(captureZone, type);
+    } else {
+      // PNG images (Infographic / Concept Map)
+      html2canvas(captureZone, { scale: 2, backgroundColor: '#0d1220', useCORS: true }).then(canvas => {
         const a = document.createElement('a');
-        a.download = `${state.concept.replace(/\s+/g,'-')}-${type}.jpg`;
-        a.href = imgData;
+        a.download = `${state.concept.replace(/\s+/g,'-')}-${type}.png`;
+        a.href = canvas.toDataURL('image/png');
         a.click();
-      } else {
-        // FIX: Push Flashcards and Quizzes into the PDF just like Slides.
-        // This guarantees the PDF keeps your CSS colors, borders, and fonts.
-        if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded. Refresh."); return; }
-        const { jsPDF } = window.jspdf;
+      });
+    }
+  }
 
-        const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
-        const doc = new jsPDF({ orientation, unit: 'mm' });
-        
-        const pdfWidth = doc.internal.pageSize.getWidth();
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-        
-        doc.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-        doc.save(`${state.concept.replace(/\s+/g,'-')}-${type}.pdf`);
+  // FIX: Native jsPDF drawing for Flashcards to perfectly preserve dark theme & boxes
+  function generateNativePDF_Flashcards() {
+    if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    let y = 20;
+
+    const paintBackground = () => { doc.setFillColor(13, 18, 32); doc.rect(0, 0, 210, 297, 'F'); };
+    paintBackground();
+
+    doc.setFont("helvetica", "bold"); doc.setTextColor(232, 184, 75); doc.setFontSize(18);
+    doc.text(`Flashcards: ${state.concept}`, 15, y);
+    y += 15;
+
+    state.flashcardData.forEach((card) => {
+      const qLines = doc.splitTextToSize(`Q: ${card.front}`, 170);
+      const aLines = doc.splitTextToSize(`A: ${card.back}`, 170);
+      const blockHeight = (qLines.length + aLines.length) * 6 + 15;
+
+      if (y + blockHeight > 280) { doc.addPage(); paintBackground(); y = 20; }
+
+      // Draw Dark Box
+      doc.setFillColor(26, 31, 46); doc.setDrawColor(232, 184, 75); doc.setLineWidth(0.5);
+      doc.rect(10, y, 190, blockHeight, 'FD');
+
+      y += 8;
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+      doc.text(qLines, 15, y);
+      y += qLines.length * 6 + 2;
+
+      doc.setTextColor(200, 200, 200); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+      doc.text(aLines, 15, y);
+      y += aLines.length * 6 + 5;
+    });
+    doc.save(`${state.concept.replace(/\s+/g,'-')}-flashcards.pdf`);
+  }
+
+  // FIX: Native jsPDF drawing for Quizzes to perfectly preserve dark theme & boxes
+  function generateNativePDF_Quiz() {
+    if (!window.jspdf?.jsPDF) { showToast("PDF library not loaded."); return; }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    let y = 20;
+
+    const paintBackground = () => { doc.setFillColor(13, 18, 32); doc.rect(0, 0, 210, 297, 'F'); };
+    paintBackground();
+
+    doc.setFont("helvetica", "bold"); doc.setTextColor(232, 184, 75); doc.setFontSize(18);
+    doc.text(state.quizData.title || `Quiz: ${state.concept}`, 15, y);
+    y += 15;
+
+    state.quizData.questions.forEach((q, qi) => {
+      const qLines = doc.splitTextToSize(`${qi+1}. ${q.question}`, 180);
+      let blockHeight = qLines.length * 7 + (q.options.length * 6) + 10;
+      
+      if (y + blockHeight > 280) { doc.addPage(); paintBackground(); y = 20; }
+
+      doc.setTextColor(255, 255, 255); doc.setFont("helvetica", "bold"); doc.setFontSize(12);
+      doc.text(qLines, 15, y);
+      y += qLines.length * 7;
+
+      doc.setTextColor(200, 200, 200); doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+      q.options.forEach((opt, oi) => {
+        const optLines = doc.splitTextToSize(`${String.fromCharCode(65+oi)}. ${opt}`, 170);
+        doc.text(optLines, 20, y);
+        y += optLines.length * 6;
+      });
+      y += 10;
+    });
+    doc.save(`${state.concept.replace(/\s+/g,'-')}-quiz.pdf`);
+  }
+
+  // FIX: Off-screen isolation for Slides and Explainer to prevent PDF cropping
+  function generateOffscreenPDF(sourceElement, type) {
+    const clone = document.createElement('div');
+    clone.innerHTML = sourceElement.innerHTML;
+    clone.style.position = 'fixed';
+    clone.style.top = '-9999px';
+    clone.style.left = '0';
+    clone.style.width = '800px'; // Fixed width prevents window size distortion
+    clone.style.backgroundColor = '#0d1220';
+    clone.style.padding = '40px';
+    document.body.appendChild(clone);
+
+    html2canvas(clone, { scale: 2, useCORS: true }).then(canvas => {
+      document.body.removeChild(clone);
+      if (!window.jspdf?.jsPDF) return;
+      
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm' });
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
+      const pdfWidth = 210;
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      let heightLeft = pdfHeight;
+      let position = 0;
+      
+      // Auto-paginate if image exceeds single page length
+      doc.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+      heightLeft -= 295;
+      
+      while (heightLeft >= 0) {
+        position = heightLeft - pdfHeight;
+        doc.addPage();
+        doc.addImage(imgData, 'JPEG', 0, position, pdfWidth, pdfHeight);
+        heightLeft -= 295;
       }
-      showToast("Download complete!");
-    }).catch(err => {
-      showToast("Failed to capture artifact.");
-      console.error(err);
+      doc.save(`${state.concept.replace(/\s+/g,'-')}-${type}.pdf`);
     });
   }
 
@@ -511,7 +575,6 @@ const App = (() => {
     goToStage(0);
   }
 
-  // ── UI Helpers ────────────────────────────────────────────────────────────
   function showAIResult(loadingId, contentId, html) {
     document.getElementById(loadingId).style.display = "none";
     const c = document.getElementById(contentId);
@@ -564,7 +627,7 @@ const App = (() => {
     if (!el) return;
     let msg = err.message || "Unknown error";
     if (msg.includes("Quota exceeded") || msg.includes("limit: 0")) {
-      msg = "API Quota Exceeded. Please verify your model is set to a free-tier limit.";
+      msg = "API Quota Exceeded. Please verify your model limits.";
     } else if (msg.length > 150) {
       msg = msg.substring(0, 150) + "..."; 
     }
