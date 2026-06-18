@@ -1,6 +1,6 @@
 /* ─────────────────────────────────────────
-   UNDERSTANDING AUDITOR — app.js (FINAL UNIFIED)
-   Contains all PDF rendering fixes, layout protections, and answer keys.
+   UNDERSTANDING AUDITOR — app.js (FINAL AUDITED)
+   Contains API caching, memory leak fixes, viewport patches, and UI state restoration.
 ───────────────────────────────────────── */
 
 const App = (() => {
@@ -24,6 +24,7 @@ const App = (() => {
     quizData:            null,
     quizAnswered:        [],
     quizCorrect:         0,
+    artifactCache:       {} // FIX: Caching system to save API requests
   };
 
   const TOTAL_STAGES = 6;
@@ -82,9 +83,10 @@ const App = (() => {
     const background = document.getElementById("backgroundInput").value.trim();
     const goal       = document.getElementById("goalInput").value.trim();
 
-    if (!concept)    { shakeInput("conceptInput");    return; }
-    if (!background) { shakeInput("backgroundInput"); return; }
-    if (!goal)       { shakeInput("goalInput");       return; }
+    // FIX: Show visual hint text, not just a shake animation
+    if (!concept)    { shakeInput("conceptInput");    showInputHint("conceptInput", "Please enter a concept."); return; }
+    if (!background) { shakeInput("backgroundInput"); showInputHint("backgroundInput", "Please enter your background."); return; }
+    if (!goal)       { shakeInput("goalInput");       showInputHint("goalInput", "Please enter your goal."); return; }
 
     state.concept = concept; state.background = background; state.goal = goal;
 
@@ -255,7 +257,7 @@ const App = (() => {
     const timer = setInterval(() => { current = Math.min(current + step, target); el.textContent = current; if (current >= target) clearInterval(timer); }, 30);
   }
 
-  // ── Stage 7: Artifacts (ISOLATED DOM ARCHITECTURE) ────────────────────────
+  // ── Stage 7: Artifacts (ISOLATED DOM ARCHITECTURE & CACHING) ─────────────
   function goToArtifacts() { goToStage(7); }
 
   function selectArtifact(type) {
@@ -270,51 +272,109 @@ const App = (() => {
 
     outputWrap.style.minHeight = "400px"; 
     outputWrap.style.display = "block"; 
+    outputWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // FIX: Load from cache to prevent API quota burn on tab switching
+    if (state.artifactCache[type]) {
+      loading.style.display = "none";
+      renderArtifactResult(state.artifactCache[type], type);
+      return;
+    }
+
     loading.style.display = "flex";
     output.style.display = "none"; 
     output.innerHTML = "";
     
     const labels = { mindmap:"Building concept map...", infographic:"Designing infographic...", flashcards:"Generating flashcards...", slides:"Creating slide deck...", explainer:"Writing article...", quiz:"Building quiz..." };
     loadingText.textContent = labels[type] || "Generating...";
-    outputWrap.scrollIntoView({ behavior: "smooth", block: "start" });
 
     AI.generateArtifact({ type, concept: state.concept, background: state.background, explanation: state.explanation, gapAnalysis: state.gapAnalysis, finalTeachBack: state.finalTeachBack, score: state.score })
       .then(result => {
+        state.artifactCache[type] = result;
         loading.style.display = "none";
-        output.style.display = "block";
-        
-        let safeHTML = "";
-        if (result.type === 'html') {
-          safeHTML = result.data.replace(/body\s*\{/g, '#captureZone {').replace(/html\s*\{/g, '#captureZone {');
-        }
-
-        output.innerHTML = `
-          <div id="captureZone" style="background:var(--bg-2); border-radius:8px; padding:1.5rem; overflow:hidden;">
-            ${result.type === 'json' ? '' : safeHTML}
-          </div>
-          <div class="download-bar" style="margin-top:1.5rem; display:flex; justify-content:flex-end;">
-            <button class="btn-download" onclick="App.downloadArtifact()">
-              ⬇ Download ${['mindmap', 'infographic'].includes(type) ? 'Image (PNG)' : 'PDF'}
-            </button>
-          </div>
-        `;
-
-        if (result.type === 'json') {
-          if (result.subtype === 'flashcards') {
-            state.flashcardData = result.data;
-            document.getElementById("captureZone").innerHTML = buildFlashcardsHTML(result.data);
-          } else if (result.subtype === 'quiz') {
-            state.quizData = result.data;
-            state.quizAnswered = new Array(result.data.questions.length).fill(null);
-            state.quizCorrect = 0;
-            document.getElementById("captureZone").innerHTML = buildQuizHTML(result.data);
-          }
-        }
+        renderArtifactResult(result, type);
       })
       .catch(err => {
-        loading.style.display = "none"; output.style.display = "block";
-        handleError(err, "artifactLoading");
+        loading.style.display = "none"; 
+        output.style.display = "block";
+        // FIX: Display error in the correct container
+        handleError(err, "artifactOutput");
       });
+  }
+
+  function renderArtifactResult(result, type) {
+    const output = document.getElementById("artifactOutput");
+    output.style.display = "block";
+
+    let safeHTML = "";
+    if (result.type === 'html') {
+      // FIX: Strengthened regex to prevent global CSS injection (`* { }`) from breaking the app
+      safeHTML = result.data
+        .replace(/body\s*\{/gi, '#captureZone {')
+        .replace(/html\s*\{/gi, '#captureZone {')
+        .replace(/\*\s*\{/gi, '#captureZone * {'); 
+    }
+
+    output.innerHTML = `
+      <div id="captureZone" style="background:var(--bg-2); border-radius:8px; padding:1.5rem; overflow:hidden;">
+        ${result.type === 'json' ? '' : safeHTML}
+      </div>
+      <div class="download-bar" style="margin-top:1.5rem; display:flex; justify-content:flex-end;">
+        <button class="btn-download" onclick="App.downloadArtifact()">
+          ⬇ Download ${['mindmap', 'infographic'].includes(type) ? 'Image (PNG)' : 'PDF'}
+        </button>
+      </div>
+    `;
+
+    if (result.type === 'json') {
+      if (result.subtype === 'flashcards') {
+        state.flashcardData = result.data;
+        document.getElementById("captureZone").innerHTML = buildFlashcardsHTML(result.data);
+      } else if (result.subtype === 'quiz') {
+        state.quizData = result.data;
+        // Keep quiz state if already answered, otherwise reset
+        if (state.quizAnswered.length !== result.data.questions.length) {
+            state.quizAnswered = new Array(result.data.questions.length).fill(null);
+            state.quizCorrect = 0;
+        }
+        document.getElementById("captureZone").innerHTML = buildQuizHTML(result.data);
+        restoreQuizVisualState(); // FIX: Restores buttons/colors if returning to tab
+      }
+    }
+  }
+
+  function restoreQuizVisualState() {
+    if (!state.quizAnswered || state.quizAnswered.length === 0) return;
+    
+    state.quizAnswered.forEach((oi, qi) => {
+      if (oi !== null) {
+        const correct = state.quizData.questions[qi].correct;
+        document.querySelectorAll(`#qopts-${qi} .quiz-option`).forEach((btn, i) => {
+          btn.disabled = true;
+          if (i === correct) btn.classList.add('correct');
+          if (i === oi && oi !== correct) btn.classList.add('wrong');
+        });
+        document.getElementById(`qe-${qi}`)?.classList.remove('hidden');
+      }
+    });
+
+    const answeredCount = state.quizAnswered.filter(a => a !== null).length;
+    const total = state.quizData.questions.length;
+    
+    const prog = document.getElementById("quizProgress");
+    if(prog) prog.textContent = `${answeredCount}/${total} answered — ${state.quizCorrect} correct`;
+
+    if (answeredCount === total && total > 0) {
+      const final = document.getElementById("quizFinal");
+      if(final) final.classList.remove('hidden');
+      const pct = state.quizCorrect / total;
+      const label = pct >= 0.9 ? '🏆 Mastery' : pct >= 0.7 ? '⭐ Strong' : pct >= 0.5 ? '📈 Getting there' : '📚 Keep studying';
+      const qfs = document.getElementById("quizFinalScore");
+      if(qfs) qfs.innerHTML = `
+        <span style="font-size:3rem;font-family:var(--font-display);color:var(--gold);font-weight:900">${state.quizCorrect}</span>
+        <span style="font-size:1.5rem;color:var(--text-dim)">/${total}</span>
+        <span style="font-family:var(--font-mono);color:var(--teal);font-size:1rem;margin-left:1rem">${label}</span>`;
+    }
   }
 
   // ── HTML Builders ──────────────────────────────────────────────────────────
@@ -564,16 +624,19 @@ const App = (() => {
   function generateOffscreenPDF(sourceElement, type) {
     const clone = document.createElement('div');
     clone.innerHTML = sourceElement.innerHTML;
-    clone.style.position = 'fixed';
-    clone.style.top = '-9999px';
-    clone.style.left = '0';
+    
+    // FIX: Set to absolute to prevent height clipping, and force width to maintain layout
+    clone.style.position = 'absolute'; 
+    clone.style.top = '0';
+    clone.style.left = '-9999px';
     clone.style.width = '800px'; 
     clone.style.backgroundColor = '#0d1220';
     clone.style.padding = '40px';
     document.body.appendChild(clone);
 
-    html2canvas(clone, { scale: 2, useCORS: true }).then(canvas => {
-      document.body.removeChild(clone);
+    // FIX: Pass scrollY to correctly align html2canvas mapping
+    html2canvas(clone, { scale: 2, useCORS: true, scrollY: 0 }).then(canvas => {
+      if (document.body.contains(clone)) document.body.removeChild(clone); // FIX: Memory cleanup
       if (!window.jspdf?.jsPDF) return;
       
       const { jsPDF } = window.jspdf;
@@ -595,6 +658,11 @@ const App = (() => {
         heightLeft -= 295;
       }
       doc.save(`${state.concept.replace(/\s+/g,'-')}-${type}.pdf`);
+    }).catch(err => {
+      // FIX: Ensure the hidden DOM block is deleted even if the capture fails
+      if (document.body.contains(clone)) document.body.removeChild(clone); 
+      console.error(err);
+      showToast("Failed to generate PDF.");
     });
   }
 
@@ -604,7 +672,8 @@ const App = (() => {
       concept:"", background:"", goal:"", priorQuiz:[], priorAnswers:[],
       gapAnalysis:"", explanation:"", stressQuestions:[], stressAnswers:[],
       stressResult:"", finalTeachBack:"", score:0, currentStage:0,
-      currentArtifactType:null, flashcardData:null, quizData:null, quizAnswered:[], quizCorrect:0
+      currentArtifactType:null, flashcardData:null, quizData:null, quizAnswered:[], quizCorrect:0,
+      artifactCache: {} // FIX: Clear memory on restart
     });
 
     ["conceptInput","backgroundInput","goalInput","finalTeachInput"]
