@@ -37,4 +37,4 @@ No bloated frameworks. Just clean, fast, vanilla code.
 
 ## 📜 License & Copyright
 
-&copy; 2026 Your Name. All rights reserved.
+&copy; 2026 Prantik Paul. All rights reserved.
