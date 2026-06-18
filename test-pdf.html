@@ -84,10 +84,10 @@
         let contentHeight = qLines.length * 7;
         
 const optLinesArr = q.options.map((opt, oi) => {
-          let mark = "[ ]";
+          let mark = "()";
           if (isAnswered) {
-            if (oi === q.correct) mark = "[*]"; // Fixed: Replaced Unicode checkmark with standard asterisk
-            else if (oi === state.quizAnswered[qi]) mark = "[x]"; 
+            if (oi === q.correct) mark = "(*)"; // Fixed: Replaced Unicode checkmark with standard asterisk
+            else if (oi === state.quizAnswered[qi]) mark = "(x)"; 
           }
           return doc.splitTextToSize(`${mark} ${String.fromCharCode(65+oi)}. ${opt}`, 160);
         });
